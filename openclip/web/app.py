@@ -75,8 +75,8 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
     settings = settings or Settings()
     out_root.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="OpenClip")
-    password = os.environ.get("OPENCLIP_PASSWORD", "")
-    username = os.environ.get("OPENCLIP_USER", "admin")
+    password = os.environ.get("OPENCLIP_PASSWORD", "").strip()
+    username = os.environ.get("OPENCLIP_USER", "").strip() or "admin"
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
