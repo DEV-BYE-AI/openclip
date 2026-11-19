@@ -36,7 +36,7 @@ def transcribe(
     compute = "float16" if device == "cuda" else "int8"
     model = WhisperModel(model_name, device=device, compute_type=compute)
     raw, _info = model.transcribe(
-        str(media), word_timestamps=True, vad_filter=True, language=language
+        load_audio(media), word_timestamps=True, vad_filter=True, language=language
     )
     segments = [
         Segment(
@@ -50,6 +50,26 @@ def transcribe(
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps([asdict(s) for s in segments], ensure_ascii=False))
     return segments
+
+
+def load_audio(media: Path, sr: int = 16000):
+    """Décode l'audio avec ffmpeg en mono 16 kHz (format attendu par Whisper).
+
+    On n'utilise pas le décodeur de faster-whisper (PyAV) : ses versions récentes ont
+    changé d'API et font planter la transcription.
+    """
+    import subprocess
+
+    import numpy as np
+
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-nostdin", "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr),
+         "-f", "f32le", "-"], capture_output=True, check=True,
+    ).stdout
+    audio = np.frombuffer(raw, dtype=np.float32)
+    if audio.size == 0:
+        raise RuntimeError("aucune piste audio dans la vidéo")
+    return audio
 
 
 def load(path: Path) -> list[Segment]:

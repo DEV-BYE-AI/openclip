@@ -75,3 +75,12 @@ def test_render_end_to_end(tmp_path: Path):
         probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height:format=duration",
                                 "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
         assert "540,960" in probe
+
+
+def test_load_audio_without_pyav(tmp_path: Path):
+    from openclip.transcribe import load_audio
+    src = tmp_path / "a.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440",
+                    "-t", "3", str(src)], check=True)
+    audio = load_audio(src)
+    assert audio.dtype.name == "float32" and abs(len(audio) / 16000 - 3) < 0.1
