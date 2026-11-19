@@ -106,6 +106,10 @@ function renderHome() {
           ${chips("num_clips", [[3, "3"], [5, "5"], [8, "8"], [12, "12"]], p.num_clips)}
         </div>
         <div>
+          <div class="opt-label">Langue de la vidéo</div>
+          ${chips("language", [["", "Auto"], ["fr", "Français"], ["en", "Anglais"], ["es", "Espagnol"]], p.language || "")}
+        </div>
+        <div>
           <div class="opt-label">Cadrage</div>
           ${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], p.crop_mode)}
         </div>
@@ -276,6 +280,7 @@ async function renderProject(pid) {
           ${m.source.url ? `<div class="stat"><a href="${esc(m.source.url)}" target="_blank" rel="noopener">Vidéo source ↗</a></div>` : ""}
           <button class="stat" id="to-queue" style="cursor:pointer">⏱ Ajouter à la file auto</button>
           <button class="stat" id="more" style="cursor:pointer;color:var(--text)">＋ D'autres clips</button>
+          <button class="stat" id="del-project" style="cursor:pointer;color:var(--danger)">Supprimer le projet</button>
         </div>
       </div>
     </div>
@@ -284,6 +289,11 @@ async function renderProject(pid) {
     </div>
     <div class="clips" id="clips"></div>`;
 
+  $("#del-project").onclick = async () => {
+    if (!confirm("Supprimer ce projet, ses clips et son analyse ? (relancer le lien refera tout à neuf)")) return;
+    try { await api(`/api/projects/${encodeURIComponent(m.id)}`, { method: "DELETE" }); toast("Projet supprimé"); location.hash = "#/projets"; }
+    catch (err) { toast(err.message, true); }
+  };
   $("#more").onclick = async () => {
     const prefs = loadPrefs();
     const n = Number(prompt("Combien de nouveaux clips ? (d'autres moments que ceux déjà montés)", prefs.num_clips || 5));

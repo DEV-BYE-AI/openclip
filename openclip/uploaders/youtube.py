@@ -60,9 +60,14 @@ def upload(settings: Settings, video: Path, title: str, description: str,
         part="snippet,status", body=body,
         media_body=MediaFileUpload(str(video), mimetype="video/mp4", resumable=True, chunksize=8 << 20),
     )
+    from googleapiclient.errors import HttpError
+
     response = None
-    while response is None:
-        _status, response = request.next_chunk()
+    try:
+        while response is None:
+            _status, response = request.next_chunk()
+    except HttpError as exc:
+        raise RuntimeError(friendly_error(exc)) from exc
     return {"video_id": response["id"], "url": f"https://youtube.com/shorts/{response['id']}"}
 
 
@@ -81,3 +86,17 @@ def channel_name() -> str:
         return items[0]["snippet"]["title"] if items else ""
     except Exception:
         return ""
+
+
+def friendly_error(exc) -> str:
+    """Traduit les erreurs courantes de l'API YouTube."""
+    text = str(exc)
+    if "uploadLimitExceeded" in text:
+        return ("YouTube : limite d'envois atteinte pour ta chaîne aujourd'hui. Vérifie ta chaîne par "
+                "téléphone sur youtube.com/verify (limite plus haute) et réessaie dans 24 h.")
+    if "quotaExceeded" in text:
+        return ("YouTube : quota quotidien de ton application Google épuisé (environ 6 envois par jour "
+                "par défaut). Réessaie demain, ou demande plus de quota dans Google Cloud.")
+    if "forbidden" in text.lower() or "insufficientPermissions" in text:
+        return "YouTube : autorisation refusée. Reconnecte YouTube dans Comptes."
+    return f"YouTube : {text[:300]}"

@@ -329,6 +329,20 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         light.submit(run)
         return job.__dict__
 
+    @app.delete("/api/projects/{pid}")
+    def remove_project(pid: str):
+        """Supprime le projet et ses analyses (transcription, sous-titres) pour repartir de zéro."""
+        import shutil
+        d = project_dir(pid)
+        shutil.rmtree(d)
+        for f in (out_root / "_sources").glob(f"{pid}.*"):
+            if f.suffix != ".mp4":  # la vidéo reste en cache : pas besoin de la retélécharger
+                f.unlink(missing_ok=True)
+        from .. import automation
+        with automation._lock:
+            automation._save_queue([q for q in automation.load_queue() if q["project"] != pid])
+        return {"ok": True}
+
     @app.delete("/api/projects/{pid}/clips/{n}")
     def remove_clip(pid: str, n: int):
         from ..pipeline import delete_clip, load_manifest

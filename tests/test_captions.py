@@ -50,3 +50,39 @@ def test_wrong_language_captions_are_rejected(tmp_path: Path, monkeypatch):
     assert pipeline._captions_language_ok(cap, src, Settings(), lambda *a: None) is False
     monkeypatch.setattr(tr, "detect_spoken_language", lambda *a, **k: ("en", 0.97))
     assert pipeline._captions_language_ok(cap, src, Settings(), lambda *a: None) is True
+
+
+def test_title_language():
+    from openclip.analyzer import title_language
+    assert title_language("GTA 6 TEST ⭐ J'AI FINI le JEU de ROCKSTAR c'est MONUMENTAL (SANS SPOILER)") == "fr"
+    assert title_language("How I built this in 30 days and what you should know") == "en"
+
+
+def test_legacy_youtube_transcript_is_rechecked(tmp_path: Path, monkeypatch):
+    """Une transcription faite par une ancienne version à partir de sous-titres anglais erronés
+    doit être jetée si la vidéo est en français."""
+    import openclip.pipeline as pipeline
+    import openclip.transcribe as tr
+    from openclip.config import Settings
+    from openclip.download import SourceVideo
+    from openclip.transcribe import Segment, Word
+
+    work = tmp_path / "out" / "_sources"
+    work.mkdir(parents=True)
+    (work / "vid.transcript.json").write_text("[]")
+    (work / "vid.captions.en-orig.json3").write_text('{"events": []}')
+    src = SourceVideo("vid", "J'ai fini le jeu", work / "vid.mp4", 600, "u")
+    monkeypatch.setattr(pipeline, "safe_download", lambda url, d: src)
+    monkeypatch.setattr(pipeline, "download_captions", lambda *a: None)
+    monkeypatch.setattr(tr, "detect_spoken_language", lambda *a, **k: ("fr", 0.95))
+    seen = {}
+
+    def fake_transcribe(media, cache, *a, **k):
+        seen["redone"] = not cache.exists()
+        raise RuntimeError("stop")  # on s'arrête après la décision
+
+    monkeypatch.setattr(pipeline, "transcribe", fake_transcribe)
+    import pytest
+    with pytest.raises(RuntimeError, match="stop"):
+        pipeline.make_clips("https://youtu.be/vid", Settings(), tmp_path / "out")
+    assert seen["redone"] is True  # l'ancienne transcription anglaise a été jetée

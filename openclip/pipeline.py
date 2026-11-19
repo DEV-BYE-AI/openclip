@@ -32,16 +32,20 @@ def _mmss(seconds: float) -> str:
     return f"{h}:{rem // 60:02d}:{rem % 60:02d}" if h else f"{rem // 60}:{rem % 60:02d}"
 
 
+def _caption_lang(captions: Path) -> str:
+    import re as _re
+
+    m = _re.search(r"\.captions\.([a-zA-Z-]+?)(?:-orig)?\.json3$", captions.name)
+    return (m.group(1) if m else "").split("-")[0].lower()
+
+
 def _captions_language_ok(captions: Path, src, settings: Settings, progress: Progress) -> bool:
     """Vérifie que la langue des sous-titres YouTube est bien celle parlée dans la vidéo.
 
     Si le créateur a mal réglé la langue de sa vidéo, YouTube transcrit par exemple du
     français avec son modèle anglais : on obtient des phrases anglaises sans aucun sens.
     """
-    import re as _re
-
-    m = _re.search(r"\.captions\.([a-zA-Z-]+?)(?:-orig)?\.json3$", captions.name)
-    cap_lang = (m.group(1) if m else "").split("-")[0].lower()
+    cap_lang = _caption_lang(captions)
     wanted = (settings.clip.language or "").lower()
     if wanted:
         ok = cap_lang == wanted
@@ -51,10 +55,14 @@ def _captions_language_ok(captions: Path, src, settings: Settings, progress: Pro
             from .transcribe import detect_spoken_language
             spoken, prob = detect_spoken_language(src.path, src.duration, settings.whisper_model,
                                                   settings.whisper_device)
-        except Exception as exc:  # pas de modèle disponible : on fait confiance à YouTube
+        except Exception as exc:  # pas de modèle disponible : on se fie au titre
             log.warning("détection de langue impossible (%s)", exc)
-            return True
-        ok = cap_lang == spoken or prob < 0.6
+            spoken, prob = "", 0.0
+        if prob >= 0.5:
+            ok = cap_lang == spoken
+        else:  # détection incertaine : on compare avec la langue du titre de la vidéo
+            from .analyzer import title_language
+            ok = title_language(src.title) in {"", cap_lang}
         if not ok:
             log.info("sous-titres YouTube en %s mais vidéo en %s (%.0f %%) : transcription locale",
                      cap_lang, spoken, prob * 100)
@@ -77,6 +85,21 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     out_dir.mkdir(parents=True, exist_ok=True)
 
     transcript = work / f"{src.video_id}.transcript.json"
+    meta_file = work / f"{src.video_id}.transcript.meta.json"
+    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    if transcript.exists() and not local_file:
+        wanted = (cs.language or "").lower()
+        legacy = not meta and any(work.glob(f"{src.video_id}.captions.*json3"))
+        wrong_lang = meta.get("source") == "youtube" and wanted and meta.get("lang") != wanted
+        if legacy or wrong_lang:
+            # transcription faite par une ancienne version (sous-titres YouTube non vérifiés)
+            # ou dans une autre langue que celle demandée : on la vérifie / refait
+            cap = next(iter(sorted(work.glob(f"{src.video_id}.captions.*json3"))), None)
+            if wrong_lang or not cap or not _captions_language_ok(cap, src, settings, progress):
+                transcript.unlink(missing_ok=True)
+            else:
+                meta = {"source": "youtube", "lang": _caption_lang(cap), "checked": True}
+                meta_file.write_text(json.dumps(meta))
     if not transcript.exists() and not local_file and settings.youtube_captions:
         # le plus rapide : les sous-titres automatiques de YouTube (quelques secondes)
         progress("transcribe", 0.12, "Récupération des sous-titres YouTube")
@@ -90,6 +113,8 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
                 segs = []
             if len(segs) >= 5:
                 transcript.write_text(json.dumps([asdict(x) for x in segs], ensure_ascii=False))
+                meta_file.write_text(json.dumps({"source": "youtube", "lang": _caption_lang(captions),
+                                                 "checked": True}))
                 progress("transcribe", 0.45, f"Sous-titres YouTube récupérés ({len(segs)} phrases)")
 
     if not transcript.exists():
@@ -104,8 +129,11 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
             msg += f" · encore ~{_mmss(elapsed / frac - elapsed)}"
         progress("transcribe", 0.15 + 0.3 * frac, msg)
 
+    fresh = not transcript.exists()
     segments = transcribe(src.path, transcript, settings.whisper_model,
                           settings.whisper_device, cs.language, progress=on_transcribe)
+    if fresh:
+        meta_file.write_text(json.dumps({"source": "whisper", "lang": cs.language or ""}))
 
     existing = load_manifest(out_dir) if (out_dir / "clips.json").exists() else None
     exclude = [(c["start"], c["end"]) for c in existing["clips"]] if existing else []

@@ -78,11 +78,26 @@ def _model(model_name: str, device: str):
 
 def detect_spoken_language(media: Path, duration: float, model_name: str = "base",
                            device: str = "cpu") -> tuple[str, float]:
-    """Langue réellement parlée, détectée par Whisper sur 30 s prises vers le premier tiers."""
-    start = max(0.0, min(duration * 0.3, duration - 30)) if duration else 0.0
-    audio = load_audio(media, start=start, length=30)
-    lang, prob, _ = _model(model_name, device).detect_language(audio)
-    return lang, prob
+    """Langue réellement parlée : Whisper écoute 3 extraits de 30 s (début, milieu, fin).
+
+    On cumule les probabilités : un passage de jeu vidéo en anglais au milieu d'une vidéo
+    commentée en français ne suffit pas à fausser le résultat.
+    """
+    model = _model(model_name, device)
+    marks = [0.2, 0.5, 0.8] if duration and duration > 120 else [0.0]
+    totals: dict[str, float] = {}
+    for frac in marks:
+        start = max(0.0, min(duration * frac, duration - 30)) if duration else 0.0
+        audio = load_audio(media, start=start, length=30)
+        if audio.size < 16000 * 3:
+            continue
+        _, _, probs = model.detect_language(audio)
+        for lang, prob in probs[:5]:
+            totals[lang] = totals.get(lang, 0.0) + prob
+    if not totals:
+        return "", 0.0
+    lang = max(totals, key=totals.get)
+    return lang, totals[lang] / len(marks)
 
 
 def load_audio(media: Path, sr: int = 16000, start: float | None = None, length: float | None = None):

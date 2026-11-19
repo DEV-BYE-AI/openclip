@@ -103,6 +103,19 @@ def detect_language(segments: list[Segment]) -> str:
     return "fr" if fr >= en else "en"
 
 
+def title_language(title: str) -> str:
+    """Langue probable d'un titre court : 'fr', 'en' ou '' si on ne sait pas."""
+    toks = _tokens(title)
+    fr = sum(t in {"le", "la", "les", "je", "tu", "est", "pas", "que", "et", "des", "une", "du", "en",
+                   "pour", "avec", "sur", "dans", "ce", "c", "j", "fini", "sans", "mon", "ma"} for t in toks)
+    fr += sum(1 for ch in title.lower() if ch in "éèêàçùôî")
+    en = sum(t in {"the", "and", "you", "is", "that", "to", "of", "it", "i", "a", "my", "with", "for",
+                   "in", "on", "this", "how", "what", "why"} for t in toks)
+    if fr == en:
+        return ""
+    return "fr" if fr > en else "en"
+
+
 def hook_strength(text: str) -> float:
     t = text.strip()
     score = sum(w for rx, w in HOOK_RE if rx.search(t))

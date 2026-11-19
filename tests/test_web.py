@@ -157,3 +157,22 @@ def test_more_clips_are_different_and_delete(tmp_path: Path, monkeypatch):
     assert client.delete(f"/api/projects/{pid}/clips/1").status_code == 200
     left = client.get(f"/api/projects/{pid}").json()["clips"]
     assert len(left) == 3 and not (tmp_path / "out" / pid / first[0]["file"]).exists()
+
+
+def test_youtube_friendly_errors():
+    from openclip.uploaders.youtube import friendly_error
+    assert "youtube.com/verify" in friendly_error(Exception("reason: 'uploadLimitExceeded'"))
+    assert "quota" in friendly_error(Exception("quotaExceeded"))
+
+
+def test_delete_project(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    make_project(tmp_path)
+    (tmp_path / "_sources").mkdir()
+    (tmp_path / "_sources" / "abc123.transcript.json").write_text("[]")
+    (tmp_path / "_sources" / "abc123.mp4").write_bytes(b"v")
+    client = TestClient(create_app(tmp_path))
+    assert client.delete("/api/projects/abc123").status_code == 200
+    assert not (tmp_path / "abc123").exists()
+    assert not (tmp_path / "_sources" / "abc123.transcript.json").exists()
+    assert (tmp_path / "_sources" / "abc123.mp4").exists()  # vidéo gardée en cache
