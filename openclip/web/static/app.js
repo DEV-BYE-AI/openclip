@@ -43,13 +43,14 @@ function savePrefs(p) { try { localStorage.setItem(PREF_KEY, JSON.stringify(p));
 /* ------------------------------------------------------------------ routeur */
 async function route() {
   const hash = location.hash || "#/";
-  if (hash !== "#/youtube" && window.__rfb) { try { window.__rfb.disconnect(); } catch {} window.__rfb = null; }
+  if (!hash.startsWith("#/youtube") && !hash.startsWith("#/connect/") && window.__rfb) { try { window.__rfb.disconnect(); } catch {} window.__rfb = null; }
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.remove("active"));
   clearInterval(pollTimer);
   if (hash.startsWith("#/p/")) return renderProject(decodeURIComponent(hash.slice(4)));
   if (hash === "#/projets") { $('[data-nav="projets"]').classList.add("active"); return renderProjects(); }
   if (hash === "#/comptes") { $('[data-nav="comptes"]').classList.add("active"); return renderAccounts(); }
   if (hash === "#/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(); }
+  if (hash === "#/connect/tiktok" || hash === "#/connect/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(hash.slice(10)); }
   $('[data-nav="home"]').classList.add("active");
   return renderHome();
 }
@@ -439,16 +440,47 @@ async function renderAccounts() {
         ${a.claude ? "" : `<div class="note">Pour des textes encore plus naturels, tu peux ajouter une clé <code>ANTHROPIC_API_KEY</code> dans <code>.env</code> (payant à l'usage).</div>`}
       </div>
       <div class="account"><h3>TikTok ${st(a.tiktok)}</h3>
-        <div class="muted">Publication directe ou en brouillon via l'API officielle.</div>
-        ${a.tiktok_configured ? `<a class="btn btn-tiktok" href="/auth/tiktok">${a.tiktok ? "Reconnecter" : "Connecter TikTok"}</a>
-          <div class="note">Redirect URI à déclarer dans ton app TikTok : <code>${esc(location.origin)}/auth/tiktok/callback</code></div>`
-        : `<div class="note">Renseigne <code>TIKTOK_CLIENT_KEY</code> et <code>TIKTOK_CLIENT_SECRET</code> dans <code>.env</code>.</div>`}
+        <div class="muted">Publie tes clips sur ton compte TikTok.</div>
+        ${a.tiktok_configured ? `<a class="btn btn-tiktok" href="#/connect/tiktok">${a.tiktok ? "Reconnecter TikTok" : "Se connecter à TikTok"}</a>` : ""}
+        ${a.tiktok ? `<button class="btn btn-sm btn-ghost" data-disconnect="tiktok">Déconnecter</button>` : ""}
+        <details ${a.tiktok_configured ? "" : "open"}>
+          <summary>${a.tiktok_configured ? "Réglages de l'application TikTok" : "Étape 1 : ton application TikTok (une seule fois)"}</summary>
+          <ol class="guide">
+            <li>Sur <b>developers.tiktok.com</b>, connecte-toi puis <b>Manage apps → Connect an app</b>.</li>
+            <li>Ajoute les produits <b>Login Kit</b> et <b>Content Posting API</b> (active « Direct Post »).</li>
+            <li>Scopes : <code>user.info.basic</code>, <code>video.upload</code>, <code>video.publish</code>.</li>
+            <li>Dans Login Kit, déclare une <b>Redirect URI</b> en https, par exemple <code>https://llabphone.com/tiktok</code> (la page n'a pas besoin d'exister).</li>
+            <li>Onglet <b>Sandbox</b> : ajoute ton compte TikTok comme « Target user » pour tester tout de suite.</li>
+            <li>Copie ici le <b>Client key</b> et le <b>Client secret</b>.</li>
+          </ol>
+          <form class="ed" id="tt-form" style="padding:0">
+            <label>Client key<input name="client_key" value="${esc(a.tiktok_client_key || "")}" autocomplete="off"></label>
+            <label>Client secret<input name="client_secret" type="password" placeholder="${a.tiktok_configured ? "•••••• (inchangé)" : ""}" autocomplete="off"></label>
+            <label>Redirect URI (identique à celle de l'app TikTok)<input name="redirect_uri" value="${esc(a.tiktok_redirect_uri || "")}" placeholder="https://llabphone.com/tiktok"></label>
+            <label>Mode de publication
+              <select name="mode">
+                <option value="draft" ${a.tiktok_mode !== "direct" ? "selected" : ""}>Brouillon : tu valides dans l'app TikTok (recommandé)</option>
+                <option value="direct" ${a.tiktok_mode === "direct" ? "selected" : ""}>Publication directe (privée tant que TikTok n'a pas audité ton app)</option>
+              </select></label>
+            <button class="btn btn-primary" style="padding:12px 18px">Enregistrer</button>
+          </form>
+        </details>
       </div>
-      <div class="account"><h3>YouTube ${st(a.youtube)}</h3>
-        <div class="muted">Publication en YouTube Shorts.</div>
-        ${a.youtube_configured ? `<a class="btn btn-yt" href="/auth/youtube">${a.youtube ? "Reconnecter" : "Connecter YouTube"}</a>
-          <div class="note">Redirect URI à déclarer dans Google Cloud (client OAuth « Application Web ») : <code>${esc(location.origin)}/auth/youtube/callback</code></div>`
-        : `<div class="note">Place ton fichier OAuth Google <code>client_secret.json</code> à la racine du projet.</div>`}
+      <div class="account"><h3>YouTube Shorts ${st(a.youtube)}</h3>
+        <div class="muted">Publie tes clips en Shorts sur ta chaîne.</div>
+        ${a.youtube_configured ? `<a class="btn btn-yt" href="#/connect/youtube">${a.youtube ? "Reconnecter YouTube" : "Se connecter à YouTube"}</a>` : ""}
+        ${a.youtube ? `<button class="btn btn-sm btn-ghost" data-disconnect="youtube">Déconnecter</button>` : ""}
+        <details ${a.youtube_configured ? "" : "open"}>
+          <summary>${a.youtube_configured ? "Application Google" : "Étape 1 : ton application Google (une seule fois)"}</summary>
+          <ol class="guide">
+            <li>Sur <b>console.cloud.google.com</b>, crée un projet.</li>
+            <li><b>API et services → Bibliothèque</b> : active <b>YouTube Data API v3</b>.</li>
+            <li><b>Écran de consentement OAuth</b> : type « Externe », puis ajoute ton adresse Gmail dans <b>Utilisateurs test</b>.</li>
+            <li><b>Identifiants → Créer → ID client OAuth</b>, type <b>« Application de bureau »</b>, puis <b>Télécharger le JSON</b>.</li>
+            <li>Envoie ce fichier ici :</li>
+          </ol>
+          <label class="btn btn-sm">${a.youtube_configured ? "Remplacer" : "Envoyer"} le fichier JSON<input type="file" id="yt-client" accept=".json,application/json" hidden></label>
+        </details>
       </div>
     </div>
     <div class="account" style="margin-top:16px">
@@ -465,7 +497,7 @@ async function renderAccounts() {
         <label class="btn btn-sm btn-ghost">${cookies.present ? "Remplacer" : "Envoyer"} un cookies.txt<input type="file" id="cookies" accept=".txt,text/plain" hidden></label>
         ${cookies.present ? `<button class="btn btn-sm btn-ghost" id="cookies-del">Supprimer</button>` : ""}
       </div>
-      <div class="note">Autre méthode (ordinateur) : , connecte-toi à YouTube (idéalement avec un compte secondaire), installe l'extension « Get cookies.txt LOCALLY » (Chrome ou Firefox), ouvre youtube.com, clique sur l'extension puis « Export ». Envoie ici le fichier obtenu. Ne le partage avec personne : il donne accès au compte.</div>
+      <div class="note">Autre méthode (ordinateur) : connecte-toi à YouTube (idéalement avec un compte secondaire), installe l'extension « Get cookies.txt LOCALLY » (Chrome ou Firefox), ouvre youtube.com, clique sur l'extension puis « Export ». Envoie ici le fichier obtenu. Ne le partage avec personne : il donne accès au compte.</div>
     </div>
     <section class="money">
       <h2>Transformer les vues en revenus</h2>
@@ -486,6 +518,32 @@ document.addEventListener("change", async (e) => {
     toast("Cookies enregistrés ✓");
     renderAccounts();
   } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "tt-form") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api("/api/settings/tiktok", { method: "POST", body: Object.fromEntries(f) });
+    toast("Réglages TikTok enregistrés ✓");
+    renderAccounts();
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "yt-client" || !e.target.files[0]) return;
+  try {
+    const res = await fetch("/api/settings/youtube-client", { method: "POST", body: await e.target.files[0].text() });
+    if (!res.ok) throw new Error((await res.json()).detail || "Fichier refusé");
+    toast("Application Google enregistrée ✓");
+    renderAccounts();
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("click", async (e) => {
+  const p = e.target.dataset?.disconnect;
+  if (!p || !confirm("Déconnecter ce compte ?")) return;
+  await api(`/api/connect/${p}`, { method: "DELETE" });
+  toast("Compte déconnecté");
+  renderAccounts();
 });
 document.addEventListener("click", async (e) => {
   if (e.target.id !== "cookies-refresh") return;
@@ -510,12 +568,19 @@ async function loadRFB() {
   catch { return (await import("https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js")).default; }
 }
 
-async function renderYoutubeLogin() {
+const CONNECT_TEXT = {
+  download: ["Connexion YouTube (téléchargement)", "Un vrai navigateur tourne sur ton serveur et s'affiche ci-dessous. Connecte-toi à ton compte Google, <b>attends d'arriver sur YouTube avec ta photo de profil en haut à droite</b>, puis touche « J'ai fini »."],
+  tiktok: ["Connecter TikTok", "La page officielle de TikTok s'ouvre ci-dessous. Connecte-toi puis touche <b>« Autoriser »</b>. Ensuite une page d'erreur peut s'afficher : c'est normal, OpenClip récupère l'autorisation tout seul."],
+  youtube: ["Connecter YouTube (publication)", "La page officielle de Google s'ouvre ci-dessous. Choisis ton compte, touche <b>« Continuer »</b> (Google prévient que l'application n'est pas validée : c'est ta propre application), coche les autorisations puis <b>« Continuer »</b>. Ensuite une page « inaccessible » s'affiche : c'est normal, OpenClip récupère l'autorisation tout seul."],
+};
+
+async function renderYoutubeLogin(mode = "download") {
   const st = await api("/api/browser");
+  const [title, intro] = CONNECT_TEXT[mode];
   view.innerHTML = `
     <a href="#/comptes" class="muted" style="text-decoration:none">← Comptes</a>
-    <h1 style="font-size:28px;margin-top:10px">Connexion YouTube</h1>
-    <p class="muted">Un vrai navigateur tourne sur ton serveur et s'affiche ci-dessous. Connecte-toi à ton compte Google, <b>attends d'arriver sur YouTube avec ta photo de profil en haut à droite</b>, puis touche « J'ai fini ».</p>
+    <h1 style="font-size:28px;margin-top:10px">${title}</h1>
+    <p class="muted">${intro}</p>
     ${st.missing.length ? `<div class="empty">Il manque sur le serveur : ${esc(st.missing.join(", "))}.<br>Relance <code>sudo bash deploy/install.sh</code> pour les installer.</div>` : `
     <div class="yt-actions">
       <button class="btn btn-primary" id="b-start">${st.running ? "Reprendre" : "Ouvrir le navigateur"}</button>
@@ -533,12 +598,13 @@ async function renderYoutubeLogin() {
         <button class="btn btn-sm btn-ghost" data-k="Tab">⇥ Tab</button>
       </div>
       <div class="note">Touche l'écran pour cliquer. Les caractères tapés dans la barre sont envoyés au champ sélectionné dans le navigateur.</div>
-      <button class="btn btn-primary" id="b-finish" style="width:100%;margin-top:12px">✓ J'ai fini, enregistrer la connexion</button>
+      ${mode === "download" ? `<button class="btn btn-primary" id="b-finish" style="width:100%;margin-top:12px">✓ J'ai fini, enregistrer la connexion</button>` : `<div class="note" id="wait-auth" style="text-align:center;margin-top:12px">En attente de ton autorisation…</div>`}
     </div>`}`;
   if (st.missing.length) return;
 
   const connect = async () => {
-    const res = await api("/api/browser/start", { method: "POST" });
+    const res = await api(mode === "download" ? "/api/browser/start" : `/api/connect/${mode}`, { method: "POST" });
+    if (mode !== "download") watchAuth();
     const RFB = await loadRFB();
     $("#screen-wrap").hidden = false;
     $("#b-start").hidden = true;
@@ -569,7 +635,18 @@ async function renderYoutubeLogin() {
   $("#k-send").onclick = send;
   $("#typer").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); window.__rfb?.sendKey(KEYS.Enter); } });
   document.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => window.__rfb?.sendKey(KEYS[b.dataset.k])));
-  $("#b-finish").onclick = async (e) => {
+  function watchAuth() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      const r = await api(`/api/connect/${mode}`).catch(() => null);
+      if (!r || r.pending) return;
+      clearInterval(pollTimer);
+      window.__rfb?.disconnect(); window.__rfb = null;
+      if (r.done) { toast(`${mode === "tiktok" ? "TikTok" : "YouTube"} connecté ✓ ${r.account || ""}`); location.hash = "#/comptes"; }
+      else { toast(r.error || "Autorisation refusée", true); renderYoutubeLogin(mode); }
+    }, 2000);
+  }
+  if ($("#b-finish")) $("#b-finish").onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = "Enregistrement…";
     window.__rfb?.disconnect(); window.__rfb = null;
     try {
@@ -582,7 +659,7 @@ async function renderYoutubeLogin() {
       renderYoutubeLogin();
     }
   };
-  if (st.running) $("#b-start").click();
+  if (st.running && mode === "download") $("#b-start").click();
 }
 
 /* ------------------------------------------------------------------ démarrage */

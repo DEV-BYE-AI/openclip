@@ -28,6 +28,9 @@ log = logging.getLogger(__name__)
 
 DISPLAY = os.environ.get("OPENCLIP_DISPLAY", ":77")
 VNC_PORT = int(os.environ.get("OPENCLIP_VNC_PORT", "5977"))
+# port de débogage de Chrome (local uniquement) : sert seulement à lire l'adresse des onglets
+# pour récupérer le code d'autorisation TikTok / Google à la fin d'une connexion
+CDP_PORT = int(os.environ.get("OPENCLIP_CDP_PORT", "9223"))
 WIDTH, HEIGHT = 540, 960  # portrait, texte lisible sur téléphone une fois l'image réduite
 PROFILE_DIR = HOME_DIR / "browser-profile"
 COOKIES_FILE = HOME_DIR / "youtube-cookies.txt"
@@ -54,6 +57,13 @@ def missing_tools() -> list[str]:
     return missing
 
 
+def _local():
+    """Requêtes vers 127.0.0.1 sans passer par un éventuel proxy réseau."""
+    import urllib.request
+
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 class LoginBrowser:
     def __init__(self) -> None:
         self._procs: dict[str, subprocess.Popen] = {}
@@ -77,6 +87,8 @@ class LoginBrowser:
     def start(self, url: str = LOGIN_URL) -> str:
         with self._lock:
             if self.running():
+                if url != LOGIN_URL:
+                    self.open_url(url)
                 return self.token or self._new_token()
             self._stop_locked()
             missing = missing_tools()
@@ -89,6 +101,7 @@ class LoginBrowser:
             for lock in PROFILE_DIR.glob("Singleton*"):
                 lock.unlink(missing_ok=True)
 
+            self._kill_leftovers()
             env = {**os.environ, "DISPLAY": DISPLAY}
             quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
             self._procs["xvfb"] = subprocess.Popen(
@@ -103,12 +116,41 @@ class LoginBrowser:
                 "--window-position=0,0", f"--window-size={WIDTH},{HEIGHT}", "--lang=fr",
                 "--disable-features=Translate,TranslateUI,MediaRouter", "--force-device-scale-factor=1",
                 "--disable-session-crashed-bubble", "--hide-crash-restore-bubble",
+                f"--remote-debugging-port={CDP_PORT}", "--remote-debugging-address=127.0.0.1",
             ]
             if os.geteuid() == 0:
                 args.append("--no-sandbox")
             self._procs["chrome"] = subprocess.Popen(args + [url], env=env, **quiet)
             self._wait_port(VNC_PORT)
+            try:
+                self._wait_port(CDP_PORT, timeout=15)
+            except RuntimeError:
+                log.warning("port de débogage de Chrome indisponible")
             return self._new_token()
+
+    # ------------------------------------------------------------------ onglets (CDP local)
+    def page_urls(self) -> list[str]:
+        """Adresses des onglets ouverts (via le port de débogage local de Chrome)."""
+        import json
+        import urllib.request
+
+        try:
+            with _local().open(f"http://127.0.0.1:{CDP_PORT}/json/list", timeout=3) as r:
+                return [t.get("url", "") for t in json.load(r) if t.get("type") == "page"]
+        except OSError:
+            return []
+
+    def open_url(self, url: str) -> None:
+        """Ouvre une adresse dans un nouvel onglet du navigateur déjà lancé."""
+        import urllib.parse
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{CDP_PORT}/json/new?{urllib.parse.quote(url, safe='')}", method="PUT")
+        try:
+            _local().open(req, timeout=5).close()
+        except OSError as exc:
+            raise RuntimeError(f"impossible d'ouvrir la page : {exc}") from exc
 
     def stop(self) -> None:
         with self._lock:
@@ -125,6 +167,19 @@ class LoginBrowser:
                 except subprocess.TimeoutExpired:
                     proc.kill()
         self.token = None
+
+    @staticmethod
+    def _kill_leftovers() -> None:
+        """Arrête un écran virtuel / VNC / Chrome restés d'un lancement précédent (crash)."""
+        num = DISPLAY.lstrip(":")
+        for pattern in (f"Xvfb {DISPLAY} ", f"x11vnc -display {DISPLAY} ", f"--user-data-dir={PROFILE_DIR}"):
+            subprocess.run(["pkill", "-f", pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
+        for stale in (Path(f"/tmp/.X{num}-lock"), Path(f"/tmp/.X11-unix/X{num}")):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
 
     def _new_token(self) -> str:
         self.token = secrets.token_urlsafe(24)
@@ -150,7 +205,7 @@ class LoginBrowser:
                 if s.connect_ex(("127.0.0.1", port)) == 0:
                     return
             time.sleep(0.2)
-        raise RuntimeError("le serveur VNC ne démarre pas")
+        raise RuntimeError(f"le port local {port} ne répond pas")
 
     # ------------------------------------------------------------------ cookies
     def finish(self) -> dict:

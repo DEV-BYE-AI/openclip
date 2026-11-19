@@ -54,8 +54,15 @@ class ClipPatch(BaseModel):
 
 class PublishIn(BaseModel):
     target: str
-    tiktok_mode: str = "direct"
+    tiktok_mode: str | None = None
     privacy: str | None = None
+
+
+class TikTokSettingsIn(BaseModel):
+    client_key: str | None = None
+    client_secret: str | None = None
+    redirect_uri: str | None = None
+    mode: str | None = None
 
 
 @dataclass
@@ -294,8 +301,8 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
         def run():
             try:
-                publish_one(d, n, settings, body.target, tiktok_mode=body.tiktok_mode,
-                            privacy=body.privacy)
+                publish_one(d, n, settings, body.target,
+                            tiktok_mode=body.tiktok_mode or settings.tiktok_mode, privacy=body.privacy)
                 update(job, stage="done", progress=1.0, message=f"Publié sur {body.target}")
             except Exception as exc:
                 update(job, stage="error", error=str(exc), message="Échec de la publication")
@@ -315,11 +322,17 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
     @app.get("/api/meta")
     def meta():
         from ..uploaders import tiktok, youtube
+        settings.reload_credentials()
         return {
             "accounts": {
                 "claude": has_claude_key(),
                 "tiktok": tiktok.is_connected(),
-                "tiktok_configured": bool(settings.tiktok_client_key),
+                "tiktok_configured": bool(settings.tiktok_client_key and settings.tiktok_client_secret
+                                          and settings.tiktok_redirect_uri.startswith("https://")),
+                "tiktok_client_key": settings.tiktok_client_key,
+                "tiktok_redirect_uri": settings.tiktok_redirect_uri
+                if settings.tiktok_redirect_uri.startswith("https://") else "",
+                "tiktok_mode": settings.tiktok_mode,
                 "youtube": youtube.is_connected(),
                 "youtube_configured": Path(settings.youtube_client_secrets).exists(),
             },
@@ -375,6 +388,64 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         flow.fetch_token(authorization_response=str(request.url))
         youtube.save_credentials(flow.credentials)
         return RedirectResponse("/#/comptes")
+
+    # ---------- applications TikTok / YouTube (publication) ----------
+    @app.post("/api/settings/tiktok")
+    def save_tiktok_settings(body: TikTokSettingsIn):
+        from ..config import save_credentials
+        if body.redirect_uri and not body.redirect_uri.startswith("https://"):
+            raise HTTPException(400, "l'adresse de retour doit commencer par https://")
+        if body.mode and body.mode not in {"draft", "direct"}:
+            raise HTTPException(400, "mode inconnu")
+        save_credentials(tiktok_client_key=(body.client_key or "").strip() or None,
+                         tiktok_client_secret=(body.client_secret or "").strip() or None,
+                         tiktok_redirect_uri=(body.redirect_uri or "").strip() or None,
+                         tiktok_mode=body.mode)
+        settings.reload_credentials()
+        return {"ok": True}
+
+    @app.post("/api/settings/youtube-client")
+    async def save_youtube_client(request: Request):
+        from ..config import YOUTUBE_CLIENT_FILE, ensure_dirs
+        try:
+            data = json.loads(await request.body())
+        except ValueError:
+            raise HTTPException(400, "ce n'est pas un fichier JSON")
+        if "installed" not in data:
+            kind = "Application Web" if "web" in data else "inconnu"
+            raise HTTPException(400, f"type de client « {kind} » : crée un identifiant OAuth de type "
+                                     "« Application de bureau » dans Google Cloud")
+        if not data["installed"].get("client_id"):
+            raise HTTPException(400, "client_id manquant dans le fichier")
+        ensure_dirs()
+        YOUTUBE_CLIENT_FILE.write_text(json.dumps(data))
+        YOUTUBE_CLIENT_FILE.chmod(0o600)
+        settings.reload_credentials()
+        return {"ok": True}
+
+    @app.post("/api/connect/{platform}")
+    def connect_start(platform: str):
+        from .. import oauth_remote
+        if platform not in {"tiktok", "youtube"}:
+            raise HTTPException(404, "plateforme inconnue")
+        try:
+            return oauth_remote.start(platform, settings)
+        except Exception as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/api/connect/{platform}")
+    def connect_poll(platform: str):
+        from .. import oauth_remote
+        return oauth_remote.poll(platform, settings)
+
+    @app.delete("/api/connect/{platform}")
+    def disconnect(platform: str):
+        from ..uploaders import tiktok, youtube
+        mod = {"tiktok": tiktok, "youtube": youtube}.get(platform)
+        if not mod:
+            raise HTTPException(404, "plateforme inconnue")
+        mod.TOKEN_FILE.unlink(missing_ok=True)
+        return {"ok": True}
 
     # ---------- connexion YouTube via navigateur distant ----------
     @app.get("/api/browser")

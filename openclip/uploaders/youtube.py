@@ -5,7 +5,8 @@ from pathlib import Path
 
 from ..config import TOKENS_DIR, Settings, ensure_dirs
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
+          "https://www.googleapis.com/auth/youtube.readonly"]
 TOKEN_FILE = TOKENS_DIR / "youtube.json"
 
 
@@ -67,3 +68,16 @@ def upload(settings: Settings, video: Path, title: str, description: str,
 
 def is_connected() -> bool:
     return TOKEN_FILE.exists()
+
+
+def channel_name() -> str:
+    """Nom de la chaîne connectée (best effort)."""
+    try:
+        from googleapiclient.discovery import build
+
+        from ..config import Settings
+        yt = build("youtube", "v3", credentials=_credentials(Settings()))
+        items = yt.channels().list(part="snippet", mine=True).execute().get("items", [])
+        return items[0]["snippet"]["title"] if items else ""
+    except Exception:
+        return ""

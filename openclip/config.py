@@ -11,6 +11,9 @@ load_dotenv(find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent /
 
 HOME_DIR = Path(os.environ.get("OPENCLIP_HOME", Path.home() / ".openclip"))
 TOKENS_DIR = HOME_DIR / "tokens"
+# identifiants d'applications saisis depuis l'interface (prioritaires sur .env)
+CREDENTIALS_FILE = HOME_DIR / "credentials.json"
+YOUTUBE_CLIENT_FILE = HOME_DIR / "youtube_client_secret.json"
 
 
 @dataclass
@@ -41,7 +44,38 @@ class Settings:
         "TIKTOK_REDIRECT_URI", "http://localhost:8765/callback"
     )
     youtube_client_secrets: str = os.environ.get("YOUTUBE_CLIENT_SECRETS", "client_secret.json")
+    tiktok_mode: str = os.environ.get("TIKTOK_MODE", "draft")  # draft (brouillon) ou direct
     clip: ClipSettings = field(default_factory=ClipSettings)
+
+    def __post_init__(self) -> None:
+        self.reload_credentials()
+
+    def reload_credentials(self) -> None:
+        saved = load_credentials()
+        for key in ("tiktok_client_key", "tiktok_client_secret", "tiktok_redirect_uri", "tiktok_mode"):
+            if saved.get(key):
+                setattr(self, key, saved[key])
+        if YOUTUBE_CLIENT_FILE.exists():
+            self.youtube_client_secrets = str(YOUTUBE_CLIENT_FILE)
+
+
+def load_credentials() -> dict:
+    import json
+
+    try:
+        return json.loads(CREDENTIALS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_credentials(**values) -> dict:
+    import json
+
+    ensure_dirs()
+    data = {**load_credentials(), **{k: v for k, v in values.items() if v is not None}}
+    CREDENTIALS_FILE.write_text(json.dumps(data, indent=2))
+    CREDENTIALS_FILE.chmod(0o600)
+    return data
 
 
 def ensure_dirs() -> None:
