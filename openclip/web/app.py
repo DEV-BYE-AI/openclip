@@ -57,6 +57,7 @@ class PublishIn(BaseModel):
     target: str
     tiktok_mode: str | None = None
     privacy: str | None = None
+    account: str = "main"
 
 
 class UploadPostIn(BaseModel):
@@ -326,8 +327,10 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
         def run():
             try:
-                publish_one(d, n, settings, body.target,
-                            tiktok_mode=body.tiktok_mode or settings.tiktok_mode, privacy=body.privacy)
+                with automation.use_profile(body.account):
+                    up_user = automation.load_settings().get("upload_post_user") or None
+                publish_one(d, n, settings, body.target, tiktok_mode=body.tiktok_mode or settings.tiktok_mode,
+                            privacy=body.privacy, account=body.account, upload_post_user=up_user)
                 update(job, stage="done", progress=1.0, message=f"Publié sur {body.target}")
             except Exception as exc:
                 update(job, stage="error", error=str(exc), message="Échec de la publication")
@@ -461,72 +464,124 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         youtube.save_credentials(flow.credentials)
         return RedirectResponse("/#/comptes")
 
-    # ---------- mode automatique ----------
+    # ---------- mode automatique (plusieurs comptes) ----------
     from .. import automation
 
     def auto_submit(url: str, options: dict, on_done) -> None:
-        job = Job(id=uuid.uuid4().hex[:10], url=url, kind="create", message="Automatique : en file d'attente")
+        name = next((p["name"] for p in automation.list_profiles() if p["id"] == automation.current_profile()), "")
+        job = Job(id=uuid.uuid4().hex[:10], url=url, kind="create",
+                  message=f"Automatique ({name}) : en file d'attente")
         jobs[job.id] = job
         heavy.submit(run_create, job, JobIn(url=url, **options), on_done)
 
     def auto_publish(project_dir: Path, index: int, target: str) -> dict:
         from ..pipeline import publish_one
-        return publish_one(project_dir, index, settings, target, tiktok_mode=settings.tiktok_mode)
+        cfg = automation.load_settings()
+        return publish_one(project_dir, index, settings, target, tiktok_mode=settings.tiktok_mode,
+                           account=automation.current_profile(),
+                           upload_post_user=cfg.get("upload_post_user") or None)
 
     scheduler = automation.Scheduler(auto_submit, auto_publish, out_root)
     app.state.scheduler = scheduler
     if os.environ.get("OPENCLIP_SCHEDULER", "1") != "0":
         scheduler.start()
 
+    def in_profile(profile: str, fn, *args):
+        if profile != "main" and not any(p["id"] == profile for p in automation.list_profiles()):
+            raise HTTPException(404, "compte inconnu")
+        with automation.use_profile(profile):
+            return fn(*args)
+
+    @app.get("/api/profiles")
+    def profiles_list():
+        from ..uploaders import tiktok
+        out = []
+        for p in automation.list_profiles():
+            with automation.use_profile(p["id"]):
+                cfg = automation.load_settings()
+                pending = sum(1 for q in automation.load_queue() if q["status"] == "pending")
+            out.append({**p, "enabled": cfg["enabled"], "pending": pending,
+                        "tiktok": tiktok.is_connected(p["id"]), "tiktok_account": cfg.get("tiktok_account", "")})
+        return out
+
+    @app.post("/api/profiles")
+    async def profiles_add(request: Request):
+        try:
+            return automation.add_profile((await request.json()).get("name", ""))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.patch("/api/profiles/{pid}")
+    async def profiles_rename(pid: str, request: Request):
+        automation.rename_profile(pid, (await request.json()).get("name", ""))
+        return {"ok": True}
+
+    @app.delete("/api/profiles/{pid}")
+    def profiles_delete(pid: str):
+        from ..uploaders import tiktok
+        try:
+            automation.delete_profile(pid)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        tiktok.token_file(pid).unlink(missing_ok=True)
+        return {"ok": True}
+
     @app.get("/api/automation")
-    def automation_get():
+    def automation_get(profile: str = "main"):
         from ..uploaders import tiktok, youtube
-        cfg = automation.load_settings()
-        queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
-        return {**cfg, "queue": queue[:100], "status": scheduler.status,
-                "connected": {t: bool(mod.is_connected() or (settings.upload_post_key and t in settings.upload_post_platforms))
-                              for t, mod in (("tiktok", tiktok), ("youtube", youtube))}}
+
+        def run():
+            cfg = automation.load_settings()
+            queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
+            via = settings.upload_post_key and "tiktok" in settings.upload_post_platforms
+            return {**cfg, "profile": profile, "queue": queue[:100], "status": scheduler.status,
+                    "connected": {"tiktok": bool(tiktok.is_connected(profile) or via),
+                                  "youtube": bool(youtube.is_connected() or
+                                                  (settings.upload_post_key and "youtube" in settings.upload_post_platforms))}}
+        return in_profile(profile, run)
 
     @app.put("/api/automation")
-    async def automation_put(request: Request):
+    async def automation_put(request: Request, profile: str = "main"):
         changes = await request.json()
-        return automation.save_settings(changes)
+        return in_profile(profile, automation.save_settings, changes)
 
     @app.post("/api/automation/channels")
-    async def automation_add_channel(request: Request):
+    async def automation_add_channel(request: Request, profile: str = "main"):
         url = (await request.json()).get("url", "").strip()
         if not url.startswith(("http://", "https://")):
             raise HTTPException(400, "colle le lien de la chaîne YouTube")
         try:
-            return automation.add_channel(url)
+            return in_profile(profile, automation.add_channel, url)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(400, str(exc))
 
     @app.delete("/api/automation/channels/{channel_id}")
-    def automation_remove_channel(channel_id: str):
-        automation.remove_channel(channel_id)
+    def automation_remove_channel(channel_id: str, profile: str = "main"):
+        in_profile(profile, automation.remove_channel, channel_id)
         return {"ok": True}
 
     @app.post("/api/automation/check")
-    def automation_check():
-        return {"new_videos": scheduler.check_channels() + scheduler.check_searches()}
+    def automation_check(profile: str = "main"):
+        return {"new_videos": in_profile(profile, lambda: scheduler.check_channels() + scheduler.check_searches())}
 
     @app.post("/api/automation/searches")
-    async def automation_add_search(request: Request):
+    async def automation_add_search(request: Request, profile: str = "main"):
         try:
-            return automation.add_search((await request.json()).get("query", ""))
+            return in_profile(profile, automation.add_search, (await request.json()).get("query", ""))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
 
     @app.delete("/api/automation/searches")
-    def automation_remove_search(query: str):
-        automation.remove_search(query)
+    def automation_remove_search(query: str, profile: str = "main"):
+        in_profile(profile, automation.remove_search, query)
         return {"ok": True}
 
     @app.get("/api/automation/preview")
-    def automation_preview(query: str):
+    def automation_preview(query: str, profile: str = "main"):
         """Aperçu des vidéos tendance qu'une recherche trouverait maintenant."""
-        cfg = automation.load_settings()
+        cfg = in_profile(profile, automation.load_settings)
         try:
             videos = automation.search_videos(query, cfg["search_period"])
         except Exception as exc:
@@ -535,21 +590,21 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
                                         float(cfg["max_video_minutes"]), 10)
 
     @app.post("/api/automation/publish-next")
-    def automation_publish_next():
-        res = scheduler.publish_next()
+    def automation_publish_next(profile: str = "main"):
+        res = in_profile(profile, scheduler.publish_next)
         if not res:
             raise HTTPException(400, "aucun clip en attente")
         return res
 
     @app.post("/api/automation/queue")
-    async def automation_enqueue(request: Request):
+    async def automation_enqueue(request: Request, profile: str = "main"):
         body = await request.json()
         d = project_dir(body.get("project", ""))
-        return {"added": automation.enqueue_project(d, float(body.get("min_score", 0)))}
+        return {"added": in_profile(profile, automation.enqueue_project, d, float(body.get("min_score", 0)))}
 
     @app.delete("/api/automation/queue/{project}/{clip}")
-    def automation_dequeue(project: str, clip: int):
-        automation.remove_from_queue(project, clip)
+    def automation_dequeue(project: str, clip: int, profile: str = "main"):
+        in_profile(profile, automation.remove_from_queue, project, clip)
         return {"ok": True}
 
     # ---------- applications TikTok / YouTube (publication) ----------
@@ -602,12 +657,13 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         return {"ok": True}
 
     @app.post("/api/connect/{platform}")
-    def connect_start(platform: str, direct: bool = False):
+    def connect_start(platform: str, direct: bool = False, profile: str = "main"):
         from .. import oauth_remote
         if platform not in {"tiktok", "youtube"}:
             raise HTTPException(404, "plateforme inconnue")
         try:
-            return oauth_remote.start(platform, settings, direct=direct and platform == "tiktok")
+            return oauth_remote.start(platform, settings, direct=direct and platform == "tiktok",
+                                      account=profile)
         except Exception as exc:
             raise HTTPException(400, str(exc))
 
@@ -617,12 +673,14 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         return oauth_remote.poll(platform, settings)
 
     @app.delete("/api/connect/{platform}")
-    def disconnect(platform: str):
+    def disconnect(platform: str, profile: str = "main"):
         from ..uploaders import tiktok, youtube
-        mod = {"tiktok": tiktok, "youtube": youtube}.get(platform)
-        if not mod:
+        if platform == "tiktok":
+            tiktok.token_file(profile).unlink(missing_ok=True)
+        elif platform == "youtube":
+            youtube.TOKEN_FILE.unlink(missing_ok=True)
+        else:
             raise HTTPException(404, "plateforme inconnue")
-        mod.TOKEN_FILE.unlink(missing_ok=True)
         return {"ok": True}
 
     # ---------- connexion YouTube via navigateur distant ----------

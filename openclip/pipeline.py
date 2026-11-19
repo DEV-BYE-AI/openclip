@@ -259,7 +259,8 @@ def caption_for(clip: dict, credit: str = "") -> str:
 
 
 def publish_one(clip_dir: Path, index: int, settings: Settings, target: str, *,
-                tiktok_mode: str = "direct", privacy: str | None = None) -> dict:
+                tiktok_mode: str = "direct", privacy: str | None = None, account: str = "main",
+                upload_post_user: str | None = None) -> dict:
     manifest = load_manifest(clip_dir)
     clip = manifest["clips"][index - 1]
     source = manifest["source"]
@@ -269,12 +270,12 @@ def publish_one(clip_dir: Path, index: int, settings: Settings, target: str, *,
     if target in via and settings.upload_post_key:
         from .uploaders import uploadpost
         desc = caption_for({**clip, "title": ""}, credit)
-        res = uploadpost.upload(settings.upload_post_key, settings.upload_post_user, video, [target],
+        res = uploadpost.upload(settings.upload_post_key, upload_post_user or settings.upload_post_user, video, [target],
                                 caption_for(clip, credit) if target == "tiktok" else clip["title"], desc)
     elif target == "tiktok":
         from .uploaders import tiktok
         res = tiktok.upload(settings, video, caption_for(clip, credit),
-                            mode=tiktok_mode, privacy=privacy)
+                            mode=tiktok_mode, privacy=privacy, account=account)
     elif target == "youtube":
         from .uploaders import youtube
         desc = caption_for({**clip, "title": ""}, credit)
@@ -284,7 +285,8 @@ def publish_one(clip_dir: Path, index: int, settings: Settings, target: str, *,
         raise ValueError(f"cible inconnue : {target}")
     res["at"] = time.time()
     manifest = load_manifest(clip_dir)  # relit au cas où le fichier a changé pendant l'envoi
-    manifest["clips"][index - 1]["uploads"][target] = res
+    key = target if account == "main" else f"{target}:{account}"
+    manifest["clips"][index - 1]["uploads"][key] = {**res, "account": account}
     _save(clip_dir, manifest)
     return res
 

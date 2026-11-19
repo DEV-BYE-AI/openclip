@@ -23,7 +23,14 @@ from ._oauth_server import wait_for_code
 
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 API = "https://open.tiktokapis.com/v2"
-TOKEN_FILE = TOKENS_DIR / "tiktok.json"
+TOKEN_FILE = TOKENS_DIR / "tiktok.json"  # compte principal
+
+
+def token_file(account: str = "main") -> Path:
+    """Un jeton par compte TikTok : tiktok.json (principal), tiktok-<compte>.json sinon."""
+    from .. import config
+    base = config.TOKENS_DIR
+    return base / ("tiktok.json" if account in ("", "main") else f"tiktok-{account}.json")
 SCOPES = "user.info.basic,video.publish,video.upload"
 MIN_CHUNK = 5 * 1024 * 1024
 CHUNK = 10 * 1024 * 1024
@@ -45,11 +52,11 @@ def authorize_url(settings: Settings, state: str, redirect_uri: str) -> str:
     })
 
 
-def exchange_code(settings: Settings, code: str, redirect_uri: str) -> dict:
+def exchange_code(settings: Settings, code: str, redirect_uri: str, account: str = "main") -> dict:
     token = _token_request(settings, {
         "code": code, "grant_type": "authorization_code", "redirect_uri": redirect_uri,
     })
-    _save(token)
+    _save(token, account)
     return token
 
 
@@ -62,8 +69,8 @@ def login(settings: Settings) -> dict:
     return exchange_code(settings, code, settings.tiktok_redirect_uri)
 
 
-def is_connected() -> bool:
-    return TOKEN_FILE.exists()
+def is_connected(account: str = "main") -> bool:
+    return token_file(account).exists()
 
 
 def _token_request(settings: Settings, data: dict) -> dict:
@@ -81,20 +88,23 @@ def _token_request(settings: Settings, data: dict) -> dict:
     return body
 
 
-def _save(token: dict) -> None:
+def _save(token: dict, account: str = "main") -> None:
     ensure_dirs()
-    TOKEN_FILE.write_text(json.dumps(token))
-    TOKEN_FILE.chmod(0o600)
+    f = token_file(account)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(token))
+    f.chmod(0o600)
 
 
-def access_token(settings: Settings) -> str:
-    if not TOKEN_FILE.exists():
-        raise TikTokError("pas connecté à TikTok : lance `openclip auth tiktok`")
-    token = json.loads(TOKEN_FILE.read_text())
+def access_token(settings: Settings, account: str = "main") -> str:
+    f = token_file(account)
+    if not f.exists():
+        raise TikTokError("compte TikTok non connecté (Auto → ce compte → Connecter TikTok)")
+    token = json.loads(f.read_text())
     if time.time() > token["obtained_at"] + token.get("expires_in", 0) - 300:
         token = _token_request(settings, {"grant_type": "refresh_token",
                                           "refresh_token": token["refresh_token"]})
-        _save(token)
+        _save(token, account)
     return token["access_token"]
 
 
@@ -111,8 +121,8 @@ def _post(path: str, token: str, payload: dict | None = None) -> dict:
     return body.get("data", {})
 
 
-def creator_info(settings: Settings) -> dict:
-    return _post("/post/publish/creator_info/query/", access_token(settings))
+def creator_info(settings: Settings, account: str = "main") -> dict:
+    return _post("/post/publish/creator_info/query/", access_token(settings, account))
 
 
 def chunk_plan(size: int) -> tuple[int, int]:
@@ -123,8 +133,8 @@ def chunk_plan(size: int) -> tuple[int, int]:
 
 
 def upload(settings: Settings, video: Path, caption: str, *, mode: str = "direct",
-           privacy: str | None = None, wait: bool = True) -> dict:
-    token = access_token(settings)
+           privacy: str | None = None, wait: bool = True, account: str = "main") -> dict:
+    token = access_token(settings, account)
     size = video.stat().st_size
     chunk_size, count = chunk_plan(size)
     source = {"source": "FILE_UPLOAD", "video_size": size,

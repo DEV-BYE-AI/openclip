@@ -40,7 +40,7 @@ _pending: dict[str, PendingAuth] = {}
 _lock = threading.Lock()
 
 
-def start(platform: str, settings: Settings, direct: bool = False) -> dict:
+def start(platform: str, settings: Settings, direct: bool = False, account: str = "main") -> dict:
     """Prépare l'autorisation. `direct` : l'utilisateur ouvre la page dans son propre navigateur
     (possible quand l'adresse de retour TikTok est OpenClip lui-même, en https)."""
     state = secrets.token_urlsafe(16)
@@ -50,7 +50,7 @@ def start(platform: str, settings: Settings, direct: bool = False) -> dict:
         if not settings.tiktok_redirect_uri.startswith("https://"):
             raise RuntimeError("indique d'abord l'adresse de retour https déclarée dans ton app TikTok")
         url = tiktok.authorize_url(settings, state, settings.tiktok_redirect_uri)
-        pending = PendingAuth("tiktok", url, settings.tiktok_redirect_uri, state)
+        pending = PendingAuth("tiktok", url, settings.tiktok_redirect_uri, state, extra=account)
     elif platform == "youtube":
         from google_auth_oauthlib.flow import Flow
 
@@ -128,9 +128,10 @@ def _finish(pending: PendingAuth, code: str, settings: Settings) -> str:
     if pending.platform == "tiktok":
         from .uploaders import tiktok
 
-        tiktok.exchange_code(settings, code, pending.redirect)
+        account = pending.extra or "main"
+        tiktok.exchange_code(settings, code, pending.redirect, account)
         try:
-            info = tiktok.creator_info(settings)
+            info = tiktok.creator_info(settings, account)
             return "@" + info.get("creator_username", "")
         except Exception:
             return ""

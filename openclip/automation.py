@@ -41,6 +41,7 @@ DEFAULTS = {
     "search_period": "week",      # today | week | month : vidéos publiées sur cette période
     "search_min_views": 10000,
     "max_new_videos_per_day": 4,  # limite la charge du serveur (chaque vidéo = plusieurs minutes)
+    "upload_post_user": "",       # profil Upload-Post de ce compte (si publication via Upload-Post)
 }
 # filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
 SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
@@ -51,9 +52,81 @@ CHECK_EVERY = 20 * 60
 
 _lock = threading.RLock()
 
+# --------------------------------------------------------------------------- comptes (profils)
+# Chaque compte publié (ex. @gta6clipvideo, @inspecteurnews) a ses propres sources, réglages,
+# heures, file d'attente et connexion TikTok. Le compte « main » garde les fichiers d'origine.
+import contextlib
+import contextvars
+import re as _re
+
+_current = contextvars.ContextVar("openclip_profile", default="main")
+
+
+def current_profile() -> str:
+    return _current.get()
+
+
+@contextlib.contextmanager
+def use_profile(pid: str):
+    token = _current.set(pid or "main")
+    try:
+        yield
+    finally:
+        _current.reset(token)
+
+
+def profile_dir(pid: str | None = None) -> Path:
+    pid = pid or _current.get()
+    return config.HOME_DIR if pid == "main" else config.HOME_DIR / "profiles" / pid
+
+
+def list_profiles() -> list[dict]:
+    saved = _read(config.HOME_DIR / "profiles.json", [])
+    if not any(p["id"] == "main" for p in saved):
+        saved.insert(0, {"id": "main", "name": "Compte principal"})
+    return saved
+
+
+def add_profile(name: str) -> dict:
+    name = name.strip()
+    if not name:
+        raise ValueError("donne un nom au compte (ex. @inspecteurnews)")
+    pid = _re.sub(r"[^a-z0-9]+", "-", name.lower().lstrip("@")).strip("-")[:30] or "compte"
+    with _lock:
+        profiles = list_profiles()
+        base, i = pid, 2
+        while any(p["id"] == pid for p in profiles):
+            pid, i = f"{base}-{i}", i + 1
+        profiles.append({"id": pid, "name": name})
+        _write(config.HOME_DIR / "profiles.json", profiles)
+    return {"id": pid, "name": name}
+
+
+def rename_profile(pid: str, name: str) -> None:
+    with _lock:
+        profiles = list_profiles()
+        for p in profiles:
+            if p["id"] == pid:
+                p["name"] = name.strip() or p["name"]
+        _write(config.HOME_DIR / "profiles.json", profiles)
+
+
+def delete_profile(pid: str) -> None:
+    if pid == "main":
+        raise ValueError("le compte principal ne peut pas être supprimé")
+    import shutil
+    with _lock:
+        _write(config.HOME_DIR / "profiles.json", [p for p in list_profiles() if p["id"] != pid])
+        shutil.rmtree(profile_dir(pid), ignore_errors=True)
+
 
 def _files() -> tuple[Path, Path]:
-    return config.HOME_DIR / "automation.json", config.HOME_DIR / "queue.json"
+    d = profile_dir()
+    return d / "automation.json", d / "queue.json"
+
+
+def _state_file() -> Path:
+    return profile_dir() / "automation-state.json"
 
 
 def _read(path: Path, default):
@@ -244,6 +317,12 @@ def enqueue_project(project_dir: Path, min_score: float) -> int:
     return added
 
 
+def _enqueue_for(pid: str, project_dir: Path, min_score: float) -> int:
+    """Appelé quand les clips sont prêts (dans un autre fil) : file d'attente du bon compte."""
+    with use_profile(pid):
+        return enqueue_project(project_dir, min_score)
+
+
 def next_pending() -> dict | None:
     pending = [q for q in load_queue() if q["status"] == "pending"]
     return max(pending, key=lambda q: (q["score"], -q["added_at"])) if pending else None
@@ -287,9 +366,9 @@ class Scheduler:
         self.submit = submit          # submit(url, options, on_done(project_dir | None))
         self.publish = publish        # publish(project_dir, clip_index, target) -> résultat
         self.out_root = out_root
-        self.last_check = 0.0
-        self.last_search = 0.0
-        self.last_slot: str | None = _read(config.HOME_DIR / "automation-state.json", {}).get("last_slot")
+        # horodatages par compte
+        self.last_check: dict[str, float] = {}
+        self.last_search: dict[str, float] = {}
         self.status = "arrêté"
         self._stop = threading.Event()
 
@@ -307,29 +386,38 @@ class Scheduler:
                 log.exception("automatisation")
 
     def tick(self, now: datetime | None = None) -> None:
+        active = 0
+        for profile in list_profiles():
+            with use_profile(profile["id"]):
+                try:
+                    active += self._tick_profile(now)
+                except Exception:
+                    log.exception("automatisation du compte %s", profile["id"])
+        self.status = "actif" if active else "désactivé"
+
+    def _tick_profile(self, now: datetime | None) -> int:
+        pid = current_profile()
         cfg = load_settings()
         if not cfg["enabled"]:
-            self.status = "désactivé"
-            return
-        if time.time() - self.last_check >= CHECK_EVERY:
+            return 0
+        if time.time() - self.last_check.get(pid, 0) >= CHECK_EVERY:
             self.check_channels(cfg)
-        if cfg["searches"] and time.time() - self.last_search >= SEARCH_EVERY:
+        if cfg["searches"] and time.time() - self.last_search.get(pid, 0) >= SEARCH_EVERY:
             self.check_searches(cfg)
         from zoneinfo import ZoneInfo
 
-        now = now or datetime.now(ZoneInfo(cfg["timezone"]))
-        key = due_slot(now, cfg["slots"], self.last_slot)
+        when = now or datetime.now(ZoneInfo(cfg["timezone"]))
+        path = _state_file()
+        key = due_slot(when, cfg["slots"], _read(path, {}).get("last_slot"))
         if key:
-            self.last_slot = key
-            path = config.HOME_DIR / "automation-state.json"
             with _lock:
                 _write(path, {**_read(path, {}), "last_slot": key})
             self.publish_next(cfg)
-        self.status = "actif"
+        return 1
 
     def check_channels(self, cfg: dict | None = None) -> int:
         cfg = cfg or load_settings()
-        self.last_check = time.time()
+        self.last_check[current_profile()] = time.time()
         found = 0
         for ch in cfg["channels"]:
             try:
@@ -350,13 +438,13 @@ class Scheduler:
 
     # -- plafond de vidéos traitées par jour (le serveur n'a que 2 cœurs)
     def _budget_left(self, cfg: dict) -> int:
-        state = _read(config.HOME_DIR / "automation-state.json", {})
+        state = _read(_state_file(), {})
         today = time.strftime("%Y-%m-%d")
         used = state.get("processed", {}).get(today, 0)
         return max(0, int(cfg["max_new_videos_per_day"]) - used)
 
     def _spend(self) -> None:
-        path = config.HOME_DIR / "automation-state.json"
+        path = _state_file()
         with _lock:
             state = _read(path, {})
             today = time.strftime("%Y-%m-%d")
@@ -369,12 +457,12 @@ class Scheduler:
             "num_clips": cfg["clips_per_video"], "preset": cfg["preset"],
             "caption_style": cfg["caption_style"], "crop_mode": cfg["crop_mode"],
             "max_video_minutes": cfg["max_video_minutes"],
-        }, lambda project_dir, ms=cfg["min_score"]: project_dir and enqueue_project(project_dir, ms))
+        }, lambda project_dir, ms=cfg["min_score"], pid=current_profile(): project_dir and _enqueue_for(pid, project_dir, ms))
 
     def check_searches(self, cfg: dict | None = None) -> int:
         """Cherche les vidéos tendance pour chaque recherche suivie et lance les meilleures."""
         cfg = cfg or load_settings()
-        self.last_search = time.time()
+        self.last_search[current_profile()] = time.time()
         found = 0
         for item in cfg["searches"]:
             budget = self._budget_left(cfg)

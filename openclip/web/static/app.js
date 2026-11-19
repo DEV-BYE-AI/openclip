@@ -305,7 +305,7 @@ async function renderProject(pid) {
     } catch (err) { toast(err.message, true); }
   };
   $("#to-queue").onclick = async () => {
-    try { const r = await api("/api/automation/queue", { method: "POST", body: { project: m.id } }); toast(r.added ? `${r.added} clip(s) ajouté(s) à la file automatique` : "Déjà dans la file"); }
+    try { const r = await api(`/api/automation/queue?profile=${encodeURIComponent(currentProfile())}`, { method: "POST", body: { project: m.id } }); toast(r.added ? `${r.added} clip(s) ajouté(s) à la file automatique` : "Déjà dans la file"); }
     catch (err) { toast(err.message, true); }
   };
   $(".toolbar").addEventListener("click", (e) => {
@@ -350,7 +350,7 @@ function clipCard(pid, c, rank) {
       <div class="muted" style="font-size:12px">Extrait ${fmtTime(c.start)} → ${fmtTime(c.end)}</div>
     </div>
     <div class="actions">
-      <button class="btn btn-sm btn-tiktok ${up.tiktok ? "done" : ""}" data-act="tiktok">${up.tiktok ? "✓ TikTok" : "Publier TikTok"}</button>
+      <button class="btn btn-sm btn-tiktok ${Object.keys(up).some((k) => k.startsWith("tiktok")) ? "done" : ""}" data-act="tiktok">${Object.keys(up).filter((k) => k.startsWith("tiktok")).length ? `✓ TikTok${Object.keys(up).filter((k) => k.startsWith("tiktok")).length > 1 ? " ×" + Object.keys(up).filter((k) => k.startsWith("tiktok")).length : ""}` : "Publier TikTok"}</button>
       <button class="btn btn-sm btn-yt ${up.youtube ? "done" : ""}" data-act="youtube">${up.youtube ? "✓ YouTube" : "Publier Shorts"}</button>
       <button class="btn btn-sm btn-ghost" data-act="edit">Modifier</button>
       <a class="btn btn-sm btn-ghost" href="/api/projects/${encodeURIComponent(pid)}/clips/${c.n}/download">Télécharger</a>
@@ -437,10 +437,20 @@ async function onClipAction(e, m) {
   if (act === "tiktok" || act === "youtube") {
     if (!META.accounts[act] && !(META.accounts.upload_post && META.accounts.upload_post_platforms.includes(act))) { toast(`Connecte d'abord ${act === "tiktok" ? "TikTok" : "YouTube"}`, true); location.hash = "#/comptes"; return; }
     if (clip.uploads?.[act] && !confirm("Ce clip est déjà publié. Le republier ?")) return;
+    let account = "main";
+    if (act === "tiktok") {
+      const linked = (await api("/api/profiles").catch(() => [])).filter((p) => p.tiktok);
+      if (linked.length > 1) {
+        const pick = prompt("Sur quel compte TikTok ?\n" + linked.map((p, i) => `${i + 1}. ${p.name}`).join("\n"), "1");
+        const chosen = linked[Number(pick) - 1];
+        if (!chosen) return;
+        account = chosen.id;
+      } else if (linked.length === 1) account = linked[0].id;
+    }
     btn.disabled = true;
     btn.textContent = "Envoi…";
     try {
-      const job = await api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}/publish`, { method: "POST", body: { target: act } });
+      const job = await api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}/publish`, { method: "POST", body: { target: act, account } });
       watchJob(job.id, () => renderProject(m.id));
     } catch (err) { toast(err.message, true); btn.disabled = false; }
   }
@@ -516,17 +526,42 @@ function openEditor(m, n) {
 }
 
 /* ------------------------------------------------------------------ mode automatique */
+function currentProfile() { try { return localStorage.getItem("openclip.profile") || "main"; } catch { return "main"; } }
+function setProfile(id) { try { localStorage.setItem("openclip.profile", id); } catch {} }
+
 async function renderAuto() {
-  let a;
-  try { a = await api("/api/automation"); } catch (e) { view.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  let a, profiles;
+  let pid = currentProfile();
+  try {
+    profiles = await api("/api/profiles");
+    if (!profiles.some((p) => p.id === pid)) { pid = "main"; setProfile(pid); }
+    a = await api(`/api/automation?profile=${encodeURIComponent(pid)}`);
+  } catch (e) { view.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const prof = profiles.find((p) => p.id === pid);
+  const q = (path) => path + (path.includes("?") ? "&" : "?") + "profile=" + encodeURIComponent(pid);
   const save = async (changes) => {
-    try { await api("/api/automation", { method: "PUT", body: changes }); renderAuto(); }
+    try { await api(q("/api/automation"), { method: "PUT", body: changes }); renderAuto(); }
     catch (err) { toast(err.message, true); }
   };
   const statusLabel = { pending: "En attente", published: "Publié ✓", failed: "Échec" };
   const missing = a.targets.filter((t) => !a.connected[t]);
   const pending = a.queue.filter((q) => q.status === "pending").length;
   view.innerHTML = `
+    <div class="chips" style="margin-bottom:18px" id="profiles">
+      ${profiles.map((p) => `<button type="button" class="chip" data-profile="${esc(p.id)}" aria-pressed="${p.id === pid}">${p.enabled ? "🟢" : "⚪️"} ${esc(p.name)}${p.pending ? ` <small>${p.pending}</small>` : ""}</button>`).join("")}
+      <button type="button" class="chip" id="profile-add">＋ Ajouter un compte</button>
+    </div>
+    <div class="account" style="margin-bottom:18px">
+      <h3>${esc(prof.name)} <span class="status ${a.connected.tiktok ? "ok" : ""}">TikTok ${a.connected.tiktok ? "connecté" : "non connecté"}</span></h3>
+      <div class="muted" style="font-size:13px">Chaque compte a ses propres sources, réglages, heures et file d'attente. Les clips de ce compte sont publiés sur <b>son</b> compte TikTok.</div>
+      <div class="chips">
+        <button class="btn btn-sm btn-tiktok" id="profile-tiktok">${prof.tiktok ? "Reconnecter" : "Connecter"} le TikTok de ce compte</button>
+        <button class="btn btn-sm btn-ghost" id="profile-rename">Renommer</button>
+        ${pid !== "main" ? `<button class="btn btn-sm btn-ghost" id="profile-del" style="color:var(--danger)">Supprimer ce compte</button>` : ""}
+      </div>
+      <div class="note">Avant de connecter : ouvre l'app TikTok et passe sur le bon compte (ou déconnecte-toi de tiktok.com dans le navigateur), puis touche le bouton et autorise. Avec ta propre app TikTok en Sandbox, ajoute chaque compte dans « Target users ».</div>
+      <label class="ed" style="padding:0;margin-top:6px">Profil Upload-Post de ce compte (optionnel)<input id="profile-up" value="${esc(a.upload_post_user || "")}" placeholder="ex. @inspecteurnews"></label>
+    </div>
     <div class="proj-head">
       <div>
         <h1 style="font-size:34px">Mode automatique</h1>
@@ -593,6 +628,28 @@ async function renderAuto() {
         ${q.status === "pending" ? `<button class="btn btn-sm btn-ghost" data-dequeue="${esc(q.project)}/${q.clip}">Retirer</button>` : ""}
       </div>`).join("") : `<div class="empty">Vide. Les clips des nouvelles vidéos arrivent ici, ou utilise « Ajouter à la file auto » sur un projet.</div>`}</div>`;
 
+  view.querySelectorAll("[data-profile]").forEach((b) => (b.onclick = () => { setProfile(b.dataset.profile); renderAuto(); }));
+  $("#profile-add").onclick = async () => {
+    const name = prompt("Nom du compte (ex. @inspecteurnews)");
+    if (!name) return;
+    try { const p = await api("/api/profiles", { method: "POST", body: { name } }); setProfile(p.id); toast(`Compte ${p.name} ajouté`); renderAuto(); }
+    catch (err) { toast(err.message, true); }
+  };
+  $("#profile-rename").onclick = async () => {
+    const name = prompt("Nouveau nom", prof.name);
+    if (name) { await api(`/api/profiles/${encodeURIComponent(pid)}`, { method: "PATCH", body: { name } }); renderAuto(); }
+  };
+  if ($("#profile-del")) $("#profile-del").onclick = async () => {
+    if (!confirm(`Supprimer le compte « ${prof.name} », ses réglages et sa file d'attente ? (les projets restent)`)) return;
+    await api(`/api/profiles/${encodeURIComponent(pid)}`, { method: "DELETE" }); setProfile("main"); renderAuto();
+  };
+  $("#profile-tiktok").onclick = async () => {
+    try {
+      const r = await api(`/api/connect/tiktok?direct=true&profile=${encodeURIComponent(pid)}`, { method: "POST" });
+      location.href = r.url;
+    } catch (err) { toast(err.message.includes("https") || err.message.includes("TIKTOK") ? "Configure d'abord ton application TikTok dans Comptes" : err.message, true); }
+  };
+  $("#profile-up").onchange = (e) => save({ upload_post_user: e.target.value.trim() });
   $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]"); if (!b) return;
@@ -605,37 +662,37 @@ async function renderAuto() {
   $("#auto-add").onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Recherche…";
-    try { const c = await api("/api/automation/channels", { method: "POST", body: { url: $("#auto-url").value.trim() } }); toast(`Chaîne suivie : ${c.name}`); renderAuto(); }
+    try { const c = await api(q("/api/automation/channels"), { method: "POST", body: { url: $("#auto-url").value.trim() } }); toast(`Chaîne suivie : ${c.name}`); renderAuto(); }
     catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Suivre"; }
   };
   $("#search-add").onsubmit = async (e) => {
     e.preventDefault();
-    try { await api("/api/automation/searches", { method: "POST", body: { query: $("#search-q").value } }); toast("Recherche ajoutée"); renderAuto(); }
+    try { await api(q("/api/automation/searches"), { method: "POST", body: { query: $("#search-q").value } }); toast("Recherche ajoutée"); renderAuto(); }
     catch (err) { toast(err.message, true); }
   };
   view.querySelectorAll("[data-unsearch]").forEach((b) => (b.onclick = async () => {
-    await api(`/api/automation/searches?query=${encodeURIComponent(b.dataset.unsearch)}`, { method: "DELETE" }); renderAuto();
+    await api(q(`/api/automation/searches?query=${encodeURIComponent(b.dataset.unsearch)}`), { method: "DELETE" }); renderAuto();
   }));
   view.querySelectorAll("[data-preview]").forEach((b) => (b.onclick = async () => {
     const box = view.querySelector(`.preview[data-for="${CSS.escape(b.dataset.preview)}"]`);
     box.innerHTML = `<div class="muted" style="font-size:13px;margin-top:8px">Recherche…</div>`;
     try {
-      const vids = await api(`/api/automation/preview?query=${encodeURIComponent(b.dataset.preview)}`);
+      const vids = await api(q(`/api/automation/preview?query=${encodeURIComponent(b.dataset.preview)}`));
       const fmtViews = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + " M" : n >= 1e3 ? Math.round(n / 1e3) + " k" : n;
       box.innerHTML = vids.length ? `<ol class="guide" style="margin-top:10px">${vids.map((v) => `<li><a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a> <span class="muted">· ${fmtViews(v.views)} vues · ${fmtTime(v.duration || 0)} · ${esc(v.channel)}</span></li>`).join("")}</ol>` : `<div class="muted" style="font-size:13px;margin-top:8px">Aucune vidéo ne passe les filtres (vues minimum, durée).</div>`;
     } catch (err) { box.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
   }));
-  view.querySelectorAll("[data-unfollow]").forEach((b) => (b.onclick = async () => { if (!confirm("Ne plus suivre cette chaîne ?")) return; await api(`/api/automation/channels/${b.dataset.unfollow}`, { method: "DELETE" }); renderAuto(); }));
-  view.querySelectorAll("[data-dequeue]").forEach((b) => (b.onclick = async () => { await api(`/api/automation/queue/${b.dataset.dequeue}`, { method: "DELETE" }); renderAuto(); }));
+  view.querySelectorAll("[data-unfollow]").forEach((b) => (b.onclick = async () => { if (!confirm("Ne plus suivre cette chaîne ?")) return; await api(q(`/api/automation/channels/${b.dataset.unfollow}`), { method: "DELETE" }); renderAuto(); }));
+  view.querySelectorAll("[data-dequeue]").forEach((b) => (b.onclick = async () => { await api(q(`/api/automation/queue/${b.dataset.dequeue}`), { method: "DELETE" }); renderAuto(); }));
   $("#auto-check").onclick = async (e) => {
     e.target.disabled = true;
-    try { const r = await api("/api/automation/check", { method: "POST" }); toast(r.new_videos ? `${r.new_videos} nouvelle(s) vidéo(s) : clips en préparation` : "Pas de nouvelle vidéo"); }
+    try { const r = await api(q("/api/automation/check"), { method: "POST" }); toast(r.new_videos ? `${r.new_videos} nouvelle(s) vidéo(s) : clips en préparation` : "Pas de nouvelle vidéo"); }
     catch (err) { toast(err.message, true); }
     e.target.disabled = false;
   };
   $("#auto-now").onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = "Publication…";
-    try { const r = await api("/api/automation/publish-next", { method: "POST" }); toast(Object.keys(r.results).length ? `Publié : ${r.title}` : "Échec de la publication", !Object.keys(r.results).length); }
+    try { const r = await api(q("/api/automation/publish-next"), { method: "POST" }); toast(Object.keys(r.results).length ? `Publié : ${r.title}` : "Échec de la publication", !Object.keys(r.results).length); }
     catch (err) { toast(err.message, true); }
     renderAuto();
   };

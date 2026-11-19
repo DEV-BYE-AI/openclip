@@ -113,3 +113,37 @@ def test_daily_budget_stops_processing(home, monkeypatch):
     sch = auto.Scheduler(lambda url, o, cb: submitted.append(url), lambda *a: {}, home)
     sch.check_searches()
     assert len(submitted) == 1
+
+
+def test_two_accounts_are_independent(home):
+    out = home / "out"
+    p2 = auto.add_profile("@inspecteurnews")
+    assert p2["id"] == "inspecteurnews"
+    assert [p["id"] for p in auto.list_profiles()] == ["main", "inspecteurnews"]
+
+    auto.save_settings({"enabled": True, "slots": ["18:00"], "targets": ["tiktok"]})
+    auto.enqueue_project(project(out, "gta", [90]), 0)
+    with auto.use_profile("inspecteurnews"):
+        auto.save_settings({"enabled": True, "slots": ["18:00"], "targets": ["tiktok"], "min_score": 70})
+        auto.enqueue_project(project(out, "police", [80]), 0)
+        assert [q["project"] for q in auto.load_queue()] == ["police"]
+    assert [q["project"] for q in auto.load_queue()] == ["gta"]
+    assert auto.load_settings()["min_score"] == 55  # réglages séparés
+
+    published = []
+    sch = auto.Scheduler(lambda *a: None,
+                         lambda d, i, t: published.append((d.name, t, auto.current_profile())) or {"ok": 1}, out)
+    sch.tick(datetime(2026, 11, 19, 18, 2))
+    assert sorted(published) == [("gta", "tiktok", "main"), ("police", "tiktok", "inspecteurnews")]
+
+    auto.delete_profile("inspecteurnews")
+    assert [p["id"] for p in auto.list_profiles()] == ["main"]
+    with pytest.raises(ValueError):
+        auto.delete_profile("main")
+
+
+def test_tiktok_token_per_account(home):
+    from openclip.uploaders import tiktok
+    assert tiktok.token_file("main").name == "tiktok.json"
+    assert tiktok.token_file("inspecteurnews").name == "tiktok-inspecteurnews.json"
+    assert not tiktok.is_connected("inspecteurnews")
