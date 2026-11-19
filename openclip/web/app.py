@@ -551,8 +551,9 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         def run():
             cfg = automation.load_settings()
             queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
-            via = settings.upload_post_key and "tiktok" in settings.upload_post_platforms
+            via = bool(settings.upload_post_key and "tiktok" in settings.upload_post_platforms)
             return {**cfg, "profile": profile, "queue": queue[:100], "status": scheduler.status,
+                    "tiktok_own": tiktok.is_connected(profile), "tiktok_via_upload_post": via,
                     "connected": {"tiktok": bool(tiktok.is_connected(profile) or via),
                                   "youtube": bool(youtube.is_connected() or
                                                   (settings.upload_post_key and "youtube" in settings.upload_post_platforms))}}

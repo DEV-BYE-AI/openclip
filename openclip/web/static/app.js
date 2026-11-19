@@ -552,7 +552,8 @@ async function renderAuto() {
       <button type="button" class="chip" id="profile-add">＋ Ajouter un compte</button>
     </div>
     <div class="account" style="margin-bottom:18px">
-      <h3>${esc(prof.name)} <span class="status ${a.connected.tiktok ? "ok" : ""}">TikTok ${a.connected.tiktok ? "connecté" : "non connecté"}</span></h3>
+      <h3>${esc(prof.name)} <span class="status ${a.tiktok_own ? "ok" : ""}">${a.tiktok_own ? "TikTok connecté" : a.tiktok_via_upload_post ? "TikTok via Upload-Post" : "TikTok non connecté"}</span></h3>
+      ${!a.tiktok_own && a.tiktok_via_upload_post ? `<div class="note" style="color:var(--amber)">TikTok passe par Upload-Post, dont le forfait gratuit refuse TikTok. Décoche TikTok dans Comptes → Upload-Post pour utiliser ta propre app TikTok.</div>` : ""}
       <div class="muted" style="font-size:13px">Chaque compte a ses propres sources, réglages, heures et file d'attente. Les clips de ce compte sont publiés sur <b>son</b> compte TikTok.</div>
       <div class="chips">
         <button class="btn btn-sm btn-tiktok" id="profile-tiktok">${prof.tiktok ? "Reconnecter" : "Connecter"} le TikTok de ce compte</button>
