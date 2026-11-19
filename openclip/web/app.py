@@ -183,9 +183,11 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     @app.get("/api/cookies")
     def cookies_status():
+        from ..browser_login import cookie_file_status
         from ..download import cookies_path
         p = cookies_path()
-        return {"present": bool(p), "updated_at": p.stat().st_mtime if p else None}
+        info = cookie_file_status(p) if p else {"present": False, "logged_in": False}
+        return {**info, "updated_at": p.stat().st_mtime if p else None}
 
     @app.post("/api/cookies")
     async def save_cookies(request: Request):

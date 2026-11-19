@@ -452,7 +452,8 @@ async function renderAccounts() {
       </div>
     </div>
     <div class="account" style="margin-top:16px">
-      <h3>Téléchargement YouTube <span class="status ${cookies.present ? "ok" : ""}">${cookies.present ? "Cookies ajoutés" : "Sans cookies"}</span></h3>
+      <h3>Téléchargement YouTube <span class="status ${cookies.logged_in ? "ok" : ""}">${cookies.logged_in ? "Connecté" : cookies.present ? "Session incomplète" : "Non connecté"}</span></h3>
+      ${cookies.present && !cookies.logged_in ? `<div class="note" style="color:var(--amber)">Les cookies actuels ne contiennent pas de session YouTube connectée : reconnecte-toi et va jusqu'à youtube.com (ta photo de profil doit apparaître en haut à droite).</div>` : ""}
       <div class="muted">YouTube bloque souvent les serveurs (« confirm you're not a bot »). Avec les cookies d'un navigateur connecté à YouTube, le téléchargement repasse.</div>
       ${cookies.present ? `<div class="note">Mis à jour le ${new Date(cookies.updated_at * 1000).toLocaleString("fr-FR")}. Ils expirent au bout de quelques semaines : renvoie-en si l'erreur revient.</div>` : ""}
       <div class="chips">
@@ -514,7 +515,7 @@ async function renderYoutubeLogin() {
   view.innerHTML = `
     <a href="#/comptes" class="muted" style="text-decoration:none">← Comptes</a>
     <h1 style="font-size:28px;margin-top:10px">Connexion YouTube</h1>
-    <p class="muted">Un vrai navigateur tourne sur ton serveur et s'affiche ci-dessous. Connecte-toi à ton compte Google / YouTube comme d'habitude, puis touche « J'ai fini ».</p>
+    <p class="muted">Un vrai navigateur tourne sur ton serveur et s'affiche ci-dessous. Connecte-toi à ton compte Google, <b>attends d'arriver sur YouTube avec ta photo de profil en haut à droite</b>, puis touche « J'ai fini ».</p>
     ${st.missing.length ? `<div class="empty">Il manque sur le serveur : ${esc(st.missing.join(", "))}.<br>Relance <code>sudo bash deploy/install.sh</code> pour les installer.</div>` : `
     <div class="yt-actions">
       <button class="btn btn-primary" id="b-start">${st.running ? "Reprendre" : "Ouvrir le navigateur"}</button>

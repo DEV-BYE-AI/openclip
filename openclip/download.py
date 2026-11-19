@@ -78,8 +78,14 @@ def safe_download(url: str, out_dir: Path) -> SourceVideo:
     except yt_dlp.utils.DownloadError as exc:
         msg = str(exc)
         if "not a bot" in msg or "Sign in to confirm" in msg:
-            hint = ("Tes cookies YouTube ont peut-être expiré : renvoie un cookies.txt récent dans Comptes."
-                    if cookies_path() else
+            from .browser_login import cookie_file_status
+            cookies = cookies_path()
+            logged = cookie_file_status(cookies)["logged_in"] if cookies else False
+            hint = ("Tes cookies ne contiennent pas de session YouTube connectée : refais « Se connecter à "
+                    "YouTube » dans Comptes, en allant jusqu'à youtube.com avec ta photo de profil visible."
+                    if cookies and not logged else
+                    "Ta session YouTube a peut-être expiré : touche « Actualiser » dans Comptes, ou reconnecte-toi."
+                    if cookies else
                     "Ajoute tes cookies YouTube dans l'onglet Comptes, ou envoie directement le fichier vidéo.")
             raise BotCheckError(f"YouTube bloque les téléchargements depuis ce serveur. {hint}") from exc
         raise

@@ -154,8 +154,18 @@ class LoginBrowser:
 
     # ------------------------------------------------------------------ cookies
     def finish(self) -> dict:
-        """Ferme le navigateur (pour qu'il enregistre la session) puis exporte les cookies."""
+        """Ferme le navigateur (pour qu'il enregistre la session) puis exporte les cookies.
+
+        Se connecter sur accounts.google.com ne suffit pas : YouTube pose ses propres cookies
+        de session (LOGIN_INFO, SAPISID sur youtube.com) seulement quand on ouvre youtube.com
+        en étant connecté. Si ils manquent, on rouvre YouTube quelques secondes nous-mêmes.
+        """
         self.stop()
+        state = cookie_state()
+        if state == "google_only":
+            self.start("https://www.youtube.com/")
+            time.sleep(15)
+            self.stop()
         count = export_cookies()
         return {"cookies": count, **self.status()}
 
@@ -168,17 +178,56 @@ class LoginBrowser:
         return self.finish()
 
 
+def youtube_logged_in(jar) -> bool:
+    """Même règle que yt-dlp : LOGIN_INFO + un cookie SAPISID sur youtube.com."""
+    yt = {c.name for c in jar if c.domain.endswith("youtube.com")}
+    return "LOGIN_INFO" in yt and bool(yt & {"SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID"})
+
+
+def _read_profile_cookies():
+    import yt_dlp
+    from yt_dlp.cookies import load_cookies
+
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        return load_cookies(None, ("chrome", str(PROFILE_DIR), "BASICTEXT", None), ydl)
+
+
+def cookie_state() -> str:
+    """'youtube' (prêt), 'google_only' (connecté à Google, pas encore à YouTube) ou 'none'."""
+    if not PROFILE_DIR.exists():
+        return "none"
+    try:
+        jar = _read_profile_cookies()
+    except Exception:
+        return "none"
+    if youtube_logged_in(jar):
+        return "youtube"
+    if any(c.name in {"SID", "__Secure-3PSID"} and c.domain.endswith("google.com") for c in jar):
+        return "google_only"
+    return "none"
+
+
+def cookie_file_status(path: Path = COOKIES_FILE) -> dict:
+    """Résumé d'un cookies.txt pour l'interface (noms seulement, jamais les valeurs)."""
+    from http.cookiejar import LoadError, MozillaCookieJar
+
+    if not path.exists():
+        return {"present": False, "logged_in": False}
+    jar = MozillaCookieJar(str(path))
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except (LoadError, OSError):
+        return {"present": True, "logged_in": False}
+    return {"present": True, "logged_in": youtube_logged_in(jar)}
+
+
 def export_cookies(dest: Path = COOKIES_FILE) -> int:
     """Lit les cookies du profil Chrome et écrit un cookies.txt (YouTube / Google uniquement)."""
     from http.cookiejar import MozillaCookieJar
 
-    import yt_dlp
-    from yt_dlp.cookies import load_cookies
-
     if not PROFILE_DIR.exists():
         raise RuntimeError("aucun profil de navigateur")
-    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-        jar = load_cookies(None, ("chrome", str(PROFILE_DIR), "BASICTEXT", None), ydl)
+    jar = _read_profile_cookies()
     out = MozillaCookieJar(str(dest))
     keep = (".youtube.com", "youtube.com", ".google.com", "accounts.google.com", ".googlevideo.com")
     n = 0
@@ -189,8 +238,13 @@ def export_cookies(dest: Path = COOKIES_FILE) -> int:
                 c.expires = int(c.expires / 1_000_000 - 11_644_473_600)
             out.set_cookie(c)
             n += 1
-    if not any(c.name in {"SID", "__Secure-3PSID", "LOGIN_INFO"} for c in out):
-        raise RuntimeError("tu n'as pas l'air connecté à YouTube : termine la connexion puis réessaie")
+    if not youtube_logged_in(out):
+        if any(c.name in {"SID", "__Secure-3PSID"} for c in out):
+            raise RuntimeError(
+                "connecté à Google mais pas encore à YouTube : rouvre le navigateur, va sur "
+                "youtube.com et vérifie que ta photo de profil apparaît en haut à droite "
+                "(sinon touche « Se connecter »), puis « J'ai fini »")
+        raise RuntimeError("tu n'as pas l'air connecté : termine la connexion puis réessaie")
     ensure_dirs()
     out.save(ignore_discard=True, ignore_expires=True)
     dest.chmod(0o600)
