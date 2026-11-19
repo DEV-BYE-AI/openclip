@@ -16,6 +16,8 @@ dependencies = [
   "python-dotenv>=1.0",
   "google-api-python-client>=2.100",
   "google-auth-oauthlib>=1.2",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
@@ -27,3 +29,6 @@ openclip = "openclip.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["openclip*"]
+
+[tool.setuptools.package-data]
+openclip = ["web/static/*"]

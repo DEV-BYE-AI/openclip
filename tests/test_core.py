@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from openclip.highlights import Highlight, heuristic, remove_overlaps, snap
-from openclip.render import build_filter, render_clip
+from openclip.render import build_graph, keep_intervals, remap_words, render_clip
 from openclip.subtitles import build_ass, chunk_words, ts
 from openclip.transcribe import Segment, Word
 from openclip.uploaders.tiktok import chunk_plan
@@ -47,8 +47,25 @@ def test_tiktok_chunk_plan():
 
 
 def test_crop_filter_bounds():
-    vf = build_filter(1920, 1080, "face", 0.99, 1080, 1920, None)
+    vf = build_graph(1920, 1080, "face", 0.99, 1080, 1920, None)
     assert "crop=606:1080:1314:0" in vf
+
+
+def test_jump_cuts_remove_long_silences():
+    words = [Word(0.0, 0.5, "a"), Word(0.6, 1.0, "b"), Word(3.0, 3.5, "c"), Word(3.6, 4.0, "d")]
+    iv = keep_intervals(words, 0.0, 4.2)
+    assert len(iv) == 2 and iv[0][1] < 1.5 and iv[1][0] > 2.5
+    remapped = remap_words(words, iv)
+    assert [w.text for w in remapped] == ["a", "b", "c", "d"]
+    assert remapped[2].start < 1.5  # le blanc de 2 s a disparu
+
+
+def test_all_caption_styles_render(tmp_path: Path):
+    from openclip.subtitles import STYLES
+    words = [Word(i * 0.5, i * 0.5 + 0.4, f"w{i}") for i in range(6)]
+    for name in STYLES:
+        txt = build_ass(words, 0, 3, tmp_path / f"{name}.ass", style=name, keywords=["w2"]).read_text()
+        assert txt.count("Dialogue: 0") == 6
 
 
 def test_render_end_to_end(tmp_path: Path):
@@ -57,8 +74,10 @@ def test_render_end_to_end(tmp_path: Path):
                     "-f", "lavfi", "-i", "sine=frequency=440", "-t", "12", "-shortest", str(src)], check=True)
     words = [Word(2 + i * 0.4, 2.35 + i * 0.4, f"bonjour{i}") for i in range(10)]
     ass = build_ass(words, 2.0, 8.0, tmp_path / "c.ass", width=540, height=960, hook="Test")
+    gappy = [Word(2.0, 3.0, "a"), Word(5.5, 6.5, "b")]
     for mode in ("center", "blur"):
-        out = render_clip(src, 2.0, 8.0, tmp_path / f"{mode}.mp4", mode=mode, ass=ass, out_w=540, out_h=960)
+        out = render_clip(src, 2.0, 8.0, tmp_path / f"{mode}.mp4", mode=mode, ass=ass, out_w=540, out_h=960,
+                          intervals=keep_intervals(gappy, 2.0, 8.0))
         probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height:format=duration",
                                 "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout
         assert "540,960" in probe

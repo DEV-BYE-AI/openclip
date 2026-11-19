@@ -33,27 +33,37 @@ class TikTokError(RuntimeError):
     pass
 
 
-def login(settings: Settings) -> dict:
+def authorize_url(settings: Settings, state: str, redirect_uri: str) -> str:
     if not settings.tiktok_client_key or not settings.tiktok_client_secret:
         raise TikTokError("TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET manquants dans .env")
-    state = secrets.token_urlsafe(16)
-    url = AUTH_URL + "?" + urllib.parse.urlencode({
+    return AUTH_URL + "?" + urllib.parse.urlencode({
         "client_key": settings.tiktok_client_key,
         "scope": SCOPES,
         "response_type": "code",
-        "redirect_uri": settings.tiktok_redirect_uri,
+        "redirect_uri": redirect_uri,
         "state": state,
     })
-    print(f"Ouvre ce lien pour autoriser OpenClip sur ton compte TikTok :\n{url}\n")
-    webbrowser.open(url)
-    code = wait_for_code(settings.tiktok_redirect_uri, state)
+
+
+def exchange_code(settings: Settings, code: str, redirect_uri: str) -> dict:
     token = _token_request(settings, {
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": settings.tiktok_redirect_uri,
+        "code": code, "grant_type": "authorization_code", "redirect_uri": redirect_uri,
     })
     _save(token)
     return token
+
+
+def login(settings: Settings) -> dict:
+    state = secrets.token_urlsafe(16)
+    url = authorize_url(settings, state, settings.tiktok_redirect_uri)
+    print(f"Ouvre ce lien pour autoriser OpenClip sur ton compte TikTok :\n{url}\n")
+    webbrowser.open(url)
+    code = wait_for_code(settings.tiktok_redirect_uri, state)
+    return exchange_code(settings, code, settings.tiktok_redirect_uri)
+
+
+def is_connected() -> bool:
+    return TOKEN_FILE.exists()
 
 
 def _token_request(settings: Settings, data: dict) -> dict:

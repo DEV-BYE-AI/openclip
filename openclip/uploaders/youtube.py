@@ -57,3 +57,7 @@ def upload(settings: Settings, video: Path, title: str, description: str,
     while response is None:
         _status, response = request.next_chunk()
     return {"video_id": response["id"], "url": f"https://youtube.com/shorts/{response['id']}"}
+
+
+def is_connected() -> bool:
+    return TOKEN_FILE.exists()

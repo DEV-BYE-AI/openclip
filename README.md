@@ -7,7 +7,20 @@ sous-titrés façon TikTok, puis peut les **publier sur TikTok et YouTube Shorts
 lien YouTube ─► yt-dlp ─► faster-whisper ─► Claude (meilleurs moments) ─► ffmpeg 9:16 + sous-titres ─► TikTok / Shorts
 ```
 
+![Aperçu de l'interface](docs/apercu-projet.png)
+
 ## Fonctionnalités
+
+### Interface web — `openclip web`
+- Colle un lien, choisis la durée, le nombre de clips, le cadrage et le style de sous-titres (aperçu en direct)
+- Suivi en direct : téléchargement → transcription → analyse IA → montage
+- Grille de clips triée par **score viral**, avec le détail **Accroche / Rétention / Partage** et
+  « pourquoi ça peut marcher » pour chaque clip
+- Éditeur : titre, description, hashtags, accroche à l'écran, mots colorés, style, début/fin (±1 s) → nouveau montage du clip
+- Publication TikTok / YouTube en un clic, téléchargement, copie de la légende
+- Page Comptes : connexion TikTok depuis le navigateur, connexion YouTube, conseils de monétisation
+
+### Moteur
 
 - Téléchargement de la vidéo (yt-dlp, jusqu'en 1080p)
 - Transcription locale au mot près (faster-whisper, langue détectée automatiquement)
@@ -15,7 +28,11 @@ lien YouTube ─► yt-dlp ─► faster-whisper ─► Claude (meilleurs moment
   Sans clé API, un algorithme de repli prend le relais.
 - Coupe propre sur les fins de phrases, durée forcée entre `--min` et `--max`
 - Recadrage 9:16 : `face` (suit le visage), `center`, ou `blur` (vidéo entière sur fond flou)
-- Sous-titres animés (3 mots à l'écran, mot prononcé surligné en jaune) et accroche affichée pendant 3 s
+- Sous-titres animés en 5 styles (`pop`, `boxed`, `neon`, `karaoke`, `minimal`) : mot prononcé surligné,
+  **mots-clés choisis par l'IA en couleur**, accroche animée affichée les 3 premières secondes
+- **Suppression automatique des blancs** (jump cuts) pour un rythme plus nerveux
+- **Barre de progression** en bas de la vidéo (incite à regarder jusqu'au bout)
+- Son normalisé à -14 LUFS (le niveau visé par TikTok / YouTube)
 - Publication TikTok via l'API officielle **Content Posting** (post direct ou brouillon)
 - Publication YouTube Shorts via l'API YouTube Data v3
 - Pas de double publication : chaque envoi est enregistré dans `clips.json`
@@ -32,6 +49,14 @@ cp .env.example .env   # puis remplis les clés
 
 ## Utilisation
 
+### Interface web (recommandé)
+
+```bash
+openclip web          # puis ouvre http://127.0.0.1:8000
+```
+
+### Ligne de commande
+
 ```bash
 # 1. Créer des clips (dans output/<id_video>/)
 openclip clip "https://www.youtube.com/watch?v=XXXX" -n 5
@@ -46,7 +71,10 @@ openclip batch liens.txt --upload tiktok
 openclip upload output/XXXX --to tiktok --only 1,3
 
 # Options utiles
-#   --min 30 --max 60       durée des clips
+#   --preset shorts|rewards|long  30-60 s / 62-95 s (TikTok Creator Rewards) / 90-170 s
+#   --style pop|boxed|neon|karaoke|minimal
+#   --no-jumpcuts --no-bar  garder les blancs / sans barre de progression
+#   --min 30 --max 60       durée personnalisée
 #   --crop face|center|blur recadrage
 #   --lang fr               forcer la langue
 #   --no-subs               sans sous-titres
@@ -67,7 +95,8 @@ Le modèle utilisé est `claude-opus-5-5` (modifiable via `OPENCLIP_MODEL`).
 ### TikTok
 1. Crée une app sur <https://developers.tiktok.com>, ajoute les produits **Login Kit** et
    **Content Posting API** (active « Direct Post »), scopes `user.info.basic`, `video.upload`, `video.publish`.
-2. Déclare la redirect URI `http://localhost:8765/callback` (ou une autre, à reporter dans `.env`).
+2. Déclare les redirect URI `http://localhost:8000/auth/tiktok/callback` (interface web) et
+   `http://localhost:8765/callback` (commande `openclip auth tiktok`).
 3. Renseigne `TIKTOK_CLIENT_KEY` et `TIKTOK_CLIENT_SECRET`, puis : `openclip auth tiktok`
 
 > ⚠️ Tant que TikTok n'a pas **audité** ton app, les posts directs sont forcés en **privé**
@@ -95,6 +124,16 @@ Pour que ça tourne tout seul, ajoute tes liens dans `liens.txt` et programme un
 ```
 
 Les vidéos déjà traitées réutilisent leur transcription en cache et les clips déjà publiés sont ignorés.
+
+## Gagner de l'argent avec ses clips
+
+- **TikTok Creator Rewards** ne rémunère que les vidéos de **plus d'1 minute** et le contenu **original** :
+  utilise `--preset rewards` (62-95 s) et apporte ta valeur (angle, commentaire, montage).
+- **YouTube Shorts** partage les revenus publicitaires une fois le Programme Partenaire atteint ; les
+  re-uploads sans transformation sont classés « contenu réutilisé » et non monétisés.
+- Beaucoup de streamers et podcasteurs paient des **clippeurs à la vue** : c'est souvent la façon la plus
+  directe de rentabiliser ce type d'outil, et tu as l'autorisation de publier.
+- Publie régulièrement, une thématique par compte, et compare les scores d'accroche avec tes vraies vues.
 
 ## Droits d'auteur
 

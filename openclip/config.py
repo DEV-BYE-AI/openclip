@@ -19,6 +19,9 @@ class ClipSettings:
     num_clips: int = 5
     crop_mode: str = "face"  # face | center | blur
     subtitles: bool = True
+    caption_style: str = "pop"  # voir subtitles.STYLES
+    jump_cuts: bool = True  # supprime les blancs > 0,6 s
+    progress_bar: bool = True
     language: str | None = None  # None = détection auto
     width: int = 1080
     height: int = 1920
@@ -40,3 +43,13 @@ class Settings:
 
 def ensure_dirs() -> None:
     TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# Préréglages de durée. Les durées tiennent compte des règles de monétisation (fin 2026) :
+# - TikTok Creator Rewards ne rémunère que les vidéos de plus d'1 minute ;
+# - YouTube Shorts partage les revenus publicitaires sur les Shorts (jusqu'à 3 min).
+PRESETS: dict[str, tuple[float, float]] = {
+    "shorts": (30, 60),     # format court classique, meilleure rétention
+    "rewards": (62, 95),    # éligible TikTok Creator Rewards (> 1 min)
+    "long": (90, 170),      # histoires complètes, Shorts jusqu'à 3 min
+}
