@@ -75,7 +75,14 @@ def ts(t: float) -> str:
     return f"{int(h)}:{int(m):02d}:{s:05.2f}"
 
 
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
+
+
 def escape(text: str) -> str:
+    # le moteur de sous-titres (libass) ne sait pas dessiner les emojis en couleur : ils
+    # apparaîtraient comme des carrés. On les retire de l'image (ils restent dans le titre).
+    text = _EMOJI.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
     return text.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
