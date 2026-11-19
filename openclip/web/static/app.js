@@ -558,13 +558,13 @@ async function renderAuto() {
     <div class="launcher" style="margin:12px 0 0;max-width:none"><div class="options">
       <div><div class="opt-label">Vidéos publiées</div>${chips("search_period", [["today", "Aujourd'hui"], ["week", "Cette semaine"], ["month", "Ce mois"]], a.search_period)}</div>
       <div><div class="opt-label">Vues minimum</div>${chips("search_min_views", [[1000, "1 k"], [10000, "10 k"], [50000, "50 k"], [200000, "200 k"]], a.search_min_views)}</div>
-      <div><div class="opt-label">Nouvelles vidéos par jour (max)</div>${chips("max_new_videos_per_day", [[2, "2"], [4, "4"], [8, "8"]], a.max_new_videos_per_day)}</div>
+      <div><div class="opt-label">Nouvelles vidéos par jour (max)</div>${chips("max_new_videos_per_day", [[1, "1 (la meilleure)"], [2, "2"], [4, "4"], [8, "8"]], a.max_new_videos_per_day)}</div>
     </div>
     <div class="tip" style="padding:0 12px 12px">⚠️ Clipper les vidéos d'autres créateurs sans leur accord expose à des réclamations de droits d'auteur et n'est pas monétisable (« contenu réutilisé »). Privilégie les créateurs qui autorisent les clips, et ajoute ta valeur (titre, accroche, montage).</div></div>
 
     <div class="section-title"><h2>Réglages</h2></div>
     <div class="launcher" style="margin:0;max-width:none"><div class="options">
-      <div><div class="opt-label">Clips par vidéo</div>${chips("clips_per_video", [[1, "1"], [2, "2"], [3, "3"], [5, "5"]], a.clips_per_video)}</div>
+      <div><div class="opt-label">Clips par vidéo</div>${chips("clips_per_video", [[1, "1"], [3, "3"], [5, "5"], [8, "8"], [12, "12"]], a.clips_per_video)}</div>
       <div><div class="opt-label">Score minimum pour publier</div>${chips("min_score", [[40, "40"], [55, "55"], [70, "70"], [80, "80"]], a.min_score)}</div>
       <div><div class="opt-label">Durée des clips</div>${chips("preset", Object.keys(PRESET_INFO).map((k) => [k, PRESET_INFO[k][0], PRESET_INFO[k][1]]), a.preset)}</div>
       <div><div class="opt-label">Cadrage</div>${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], a.crop_mode)}</div>
@@ -657,7 +657,9 @@ async function renderAccounts() {
       </div>
       <div class="account"><h3>TikTok ${st(a.tiktok)}</h3>
         <div class="muted">Publie tes clips sur ton compte TikTok.</div>
-        ${a.tiktok_configured ? `<a class="btn btn-tiktok" href="#/connect/tiktok">${a.tiktok ? "Reconnecter TikTok" : "Se connecter à TikTok"}</a>` : ""}
+        ${a.tiktok_configured ? (a.tiktok_redirect_uri.startsWith(location.origin + "/")
+          ? `<button class="btn btn-tiktok" id="tt-direct">${a.tiktok ? "Reconnecter TikTok" : "Se connecter à TikTok"}</button>`
+          : `<a class="btn btn-tiktok" href="#/connect/tiktok">${a.tiktok ? "Reconnecter TikTok" : "Se connecter à TikTok"}</a>`) : ""}
         ${a.tiktok ? `<button class="btn btn-sm btn-ghost" data-disconnect="tiktok">Déconnecter</button>` : ""}
         <details ${a.tiktok_configured ? "" : "open"}>
           <summary>${a.tiktok_configured ? "Réglages de l'application TikTok" : "Étape 1 : ton application TikTok (une seule fois)"}</summary>
@@ -734,6 +736,13 @@ document.addEventListener("change", async (e) => {
     if (!res.ok) throw new Error((await res.json()).detail || "Fichier refusé");
     toast("Cookies enregistrés ✓");
     renderAccounts();
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "tt-direct") return;
+  try {
+    const r = await api("/api/connect/tiktok?direct=true", { method: "POST" });
+    location.href = r.url;  // page officielle TikTok, puis retour sur OpenClip
   } catch (err) { toast(err.message, true); }
 });
 document.addEventListener("submit", async (e) => {

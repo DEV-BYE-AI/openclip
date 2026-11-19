@@ -40,7 +40,9 @@ _pending: dict[str, PendingAuth] = {}
 _lock = threading.Lock()
 
 
-def start(platform: str, settings: Settings) -> dict:
+def start(platform: str, settings: Settings, direct: bool = False) -> dict:
+    """Prépare l'autorisation. `direct` : l'utilisateur ouvre la page dans son propre navigateur
+    (possible quand l'adresse de retour TikTok est OpenClip lui-même, en https)."""
     state = secrets.token_urlsafe(16)
     if platform == "tiktok":
         from .uploaders import tiktok
@@ -63,8 +65,28 @@ def start(platform: str, settings: Settings) -> dict:
         raise ValueError("plateforme inconnue")
     with _lock:
         _pending[platform] = pending
+    if direct:
+        return {"url": url}
     token = browser.start(url)
     return {"token": token}
+
+
+def finish_direct(platform: str, state: str, code: str, error: str, settings: Settings) -> dict:
+    """Appelé par la page de retour d'OpenClip (/callback/<plateforme>)."""
+    with _lock:
+        pending = _pending.get(platform)
+    if not pending or not state or not secrets.compare_digest(state, pending.state):
+        return {"done": False, "error": "lien d'autorisation expiré : recommence depuis OpenClip"}
+    if error:
+        pending.error = error
+        return {"done": False, "error": error}
+    try:
+        pending.account = _finish(pending, code, settings)
+        pending.done = True
+    except Exception as exc:
+        pending.error = str(exc)
+        return {"done": False, "error": str(exc)}
+    return {"done": True, "account": pending.account}
 
 
 def poll(platform: str, settings: Settings) -> dict:

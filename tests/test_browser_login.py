@@ -40,3 +40,25 @@ def test_publication_settings(tmp_path, monkeypatch):
     ok = {"installed": {"client_id": "id", "client_secret": "s", "auth_uri": "a", "token_uri": "t"}}
     assert client.post("/api/settings/youtube-client", content=json.dumps(ok)).status_code == 200
     assert client.get("/api/meta").json()["accounts"]["youtube_configured"] is True
+
+
+def test_tiktok_direct_callback(tmp_path, monkeypatch):
+    import urllib.parse
+
+    import openclip.config as config
+    from openclip import oauth_remote
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    monkeypatch.setattr(config, "TOKENS_DIR", tmp_path / "home" / "tokens")
+    monkeypatch.setattr(config, "CREDENTIALS_FILE", tmp_path / "home" / "credentials.json")
+    client = TestClient(create_app(tmp_path / "out"))
+    client.post("/api/settings/tiktok", json={"client_key": "ck", "client_secret": "cs",
+                                              "redirect_uri": "https://testserver/callback/tiktok"})
+    url = client.post("/api/connect/tiktok?direct=true").json()["url"]
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert url.startswith("https://www.tiktok.com/") and q["redirect_uri"] == ["https://testserver/callback/tiktok"]
+
+    assert "expiré" in client.get("/callback/tiktok?code=x&state=faux").text
+    monkeypatch.setattr(oauth_remote, "_finish", lambda p, code, s: "@gta6clipvideo")
+    page = client.get(f"/callback/tiktok?code=abc&state={q['state'][0]}").text
+    assert "TikTok connecté" in page and "@gta6clipvideo" in page

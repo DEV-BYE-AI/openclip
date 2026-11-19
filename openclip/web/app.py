@@ -577,12 +577,12 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         return {"ok": True}
 
     @app.post("/api/connect/{platform}")
-    def connect_start(platform: str):
+    def connect_start(platform: str, direct: bool = False):
         from .. import oauth_remote
         if platform not in {"tiktok", "youtube"}:
             raise HTTPException(404, "plateforme inconnue")
         try:
-            return oauth_remote.start(platform, settings)
+            return oauth_remote.start(platform, settings, direct=direct and platform == "tiktok")
         except Exception as exc:
             raise HTTPException(400, str(exc))
 
@@ -721,7 +721,19 @@ révoqué à tout moment depuis les paramètres TikTok ou Google du compte.</p>
 {f"<h2>Contact</h2><p>{contact}</p>" if contact else ""}""")
 
     @app.get("/callback/{platform}", response_class=HTMLResponse)
-    def oauth_landing(platform: str):
+    def oauth_landing(platform: str, code: str = "", state: str = "", error: str = "",
+                      error_description: str = ""):
+        from html import escape
+
+        from .. import oauth_remote
+        if platform == "tiktok" and (code or error):
+            res = oauth_remote.finish_direct("tiktok", state, code, error_description or error, settings)
+            if res["done"]:
+                return public_page("TikTok connecté ✓", f"""<p>Compte {escape(res.get('account') or '')}
+                    autorisé. OpenClip peut maintenant publier tes clips.</p>
+                    <p><a href="/#/comptes">← Revenir dans OpenClip</a></p>""")
+            return public_page("Connexion TikTok impossible",
+                               f"<p>{escape(res['error'])}</p><p><a href='/#/comptes'>← Revenir dans OpenClip</a></p>")
         return public_page("Autorisation reçue",
                            "<p>Tu peux revenir dans OpenClip : la connexion se termine automatiquement.</p>")
 
