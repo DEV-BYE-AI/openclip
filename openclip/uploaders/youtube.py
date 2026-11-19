@@ -32,6 +32,12 @@ def _credentials(settings: Settings, interactive: bool = False):
     return creds
 
 
+def save_credentials(creds) -> None:
+    ensure_dirs()
+    TOKEN_FILE.write_text(creds.to_json())
+    TOKEN_FILE.chmod(0o600)
+
+
 def login(settings: Settings) -> None:
     _credentials(settings, interactive=True)
 

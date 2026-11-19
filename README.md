@@ -115,6 +115,38 @@ Le modèle utilisé est `claude-opus-5-5` (modifiable via `OPENCLIP_MODEL`).
 
 Les jetons sont stockés dans `~/.openclip/tokens/` (permissions 600).
 
+## Installer sur ton serveur (à côté d'un site existant)
+
+OpenClip tourne comme un service séparé : ton autre site n'est pas modifié.
+
+```bash
+ssh ubuntu@IP_DU_SERVEUR
+git clone -b ccr-ed73dc5a-4rh1a8 https://github.com/dev-bye-ai/openclip.git
+cd openclip
+
+# Test rapide : http://IP_DU_SERVEUR:8001
+sudo bash deploy/install.sh
+
+# Ou sur un sous-domaine en https (créer d'abord un enregistrement DNS A clip.mondomaine.fr -> IP)
+sudo bash deploy/install.sh --domain clip.mondomaine.fr
+```
+
+Le script installe ffmpeg et Python, crée le service `openclip` (redémarre tout seul), génère un
+mot de passe pour l'interface et l'affiche à la fin. Il vérifie que le port est libre, et en mode
+sous-domaine il ajoute un site nginx séparé (annulé automatiquement si la config nginx est invalide).
+
+Ensuite : remplis `ANTHROPIC_API_KEY` dans `.env` puis `sudo systemctl restart openclip`.
+
+- Logs : `sudo journalctl -u openclip -f`
+- Mise à jour : `git pull && sudo bash deploy/install.sh` (avec les mêmes options)
+- **Connexion TikTok / YouTube** : les deux plateformes exigent une adresse https avec un nom de
+  domaine. Utilise le mode `--domain`, et déclare `https://clip.mondomaine.fr/auth/tiktok/callback` et
+  `https://clip.mondomaine.fr/auth/youtube/callback` (client Google de type « Application Web »).
+- **YouTube bloque souvent les serveurs** (« confirme que tu n'es pas un robot ») : exporte les cookies
+  de ton navigateur avec une extension « cookies.txt », envoie le fichier sur le serveur et indique son
+  chemin dans `YTDLP_COOKIES`.
+- Petit serveur (1-2 Go de RAM) : mets `WHISPER_MODEL=base` dans `.env`, la transcription sera plus rapide.
+
 ## Automatisation
 
 Pour que ça tourne tout seul, ajoute tes liens dans `liens.txt` et programme une tâche cron :

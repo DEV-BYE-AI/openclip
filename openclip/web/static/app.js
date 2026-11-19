@@ -408,7 +408,8 @@ async function renderAccounts() {
       </div>
       <div class="account"><h3>YouTube ${st(a.youtube)}</h3>
         <div class="muted">Publication en YouTube Shorts.</div>
-        ${a.youtube_configured ? `<button class="btn btn-yt" id="yt">${a.youtube ? "Reconnecter" : "Connecter YouTube"}</button>`
+        ${a.youtube_configured ? `<a class="btn btn-yt" href="/auth/youtube">${a.youtube ? "Reconnecter" : "Connecter YouTube"}</a>
+          <div class="note">Redirect URI à déclarer dans Google Cloud (client OAuth « Application Web ») : <code>${esc(location.origin)}/auth/youtube/callback</code></div>`
         : `<div class="note">Place ton fichier OAuth Google <code>client_secret.json</code> à la racine du projet.</div>`}
       </div>
     </div>
@@ -421,10 +422,6 @@ async function renderAccounts() {
         <li>Publie régulièrement (1 à 3 clips par jour), garde une seule thématique par compte, et regarde quels scores d'accroche donnent les meilleures vues pour affiner tes choix.</li>
       </ol>
     </section>`;
-  $("#yt")?.addEventListener("click", async () => {
-    await api("/api/auth/youtube", { method: "POST" });
-    toast("Une fenêtre Google s'ouvre sur cet ordinateur…");
-  });
 }
 
 /* ------------------------------------------------------------------ démarrage */

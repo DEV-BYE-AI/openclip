@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import os
+
 import yt_dlp
 
 
@@ -28,6 +30,11 @@ def download(url: str, out_dir: Path) -> SourceVideo:
         "quiet": True,
         "no_warnings": True,
     }
+    # Sur un serveur, YouTube demande souvent « confirme que tu n'es pas un robot » :
+    # exporte les cookies de ton navigateur (format Netscape) et indique le fichier ici.
+    cookies = os.environ.get("YTDLP_COOKIES")
+    if cookies:
+        opts["cookiefile"] = cookies
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         path = Path(ydl.prepare_filename(info)).with_suffix(".mp4")

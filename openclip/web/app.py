@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,27 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
     settings = settings or Settings()
     out_root.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="OpenClip")
+    password = os.environ.get("OPENCLIP_PASSWORD", "")
+    username = os.environ.get("OPENCLIP_USER", "admin")
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        """Protège toute l'interface par identifiant / mot de passe si OPENCLIP_PASSWORD est défini."""
+        if password:
+            import base64
+            ok = False
+            header = request.headers.get("authorization", "")
+            if header.lower().startswith("basic "):
+                try:
+                    user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
+                    ok = secrets.compare_digest(user.encode(), username.encode()) and \
+                        secrets.compare_digest(pwd.encode(), password.encode())
+                except (ValueError, UnicodeDecodeError):
+                    ok = False
+            if not ok:
+                return Response("Identifiant requis", status_code=401,
+                                headers={"WWW-Authenticate": 'Basic realm="OpenClip", charset="UTF-8"'})
+        return await call_next(request)
     jobs: dict[str, Job] = {}
     lock = threading.Lock()
     heavy = ThreadPoolExecutor(max_workers=1)   # téléchargement / whisper / ffmpeg
@@ -263,12 +284,34 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         tiktok.exchange_code(settings, code, str(request.url_for("auth_tiktok_callback")))
         return RedirectResponse("/#/comptes")
 
-    @app.post("/api/auth/youtube")
-    def auth_youtube():
+    youtube_flows: dict = {}
+
+    @app.get("/auth/youtube")
+    def auth_youtube(request: Request):
+        from google_auth_oauthlib.flow import Flow
+
         from ..uploaders import youtube
-        # ouvre le navigateur sur la machine qui fait tourner OpenClip
-        light.submit(youtube.login, settings)
-        return {"started": True}
+        if not Path(settings.youtube_client_secrets).exists():
+            raise HTTPException(400, f"fichier OAuth introuvable : {settings.youtube_client_secrets}")
+        flow = Flow.from_client_secrets_file(
+            settings.youtube_client_secrets, scopes=youtube.SCOPES,
+            redirect_uri=str(request.url_for("auth_youtube_callback")),
+        )
+        url, state = flow.authorization_url(access_type="offline", prompt="consent")
+        youtube_flows[state] = flow
+        return RedirectResponse(url)
+
+    @app.get("/auth/youtube/callback", name="auth_youtube_callback")
+    def auth_youtube_callback(request: Request, state: str = "", error: str = ""):
+        from ..uploaders import youtube
+        flow = youtube_flows.pop(state, None)
+        if error or flow is None:
+            raise HTTPException(400, error or "state OAuth invalide, recommence la connexion")
+        if request.url.scheme == "http" and request.url.hostname in {"localhost", "127.0.0.1"}:
+            os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow.fetch_token(authorization_response=str(request.url))
+        youtube.save_credentials(flow.credentials)
+        return RedirectResponse("/#/comptes")
 
     app.mount("/media", StaticFiles(directory=out_root), name="media")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -283,5 +326,12 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 def serve(host: str, port: int, out_root: Path) -> None:
     import uvicorn
 
+    if host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("OPENCLIP_PASSWORD"):
+        raise SystemExit(
+            "Refus de démarrer : l'interface serait accessible à tout Internet sans mot de passe.\n"
+            "Ajoute OPENCLIP_PASSWORD=... dans .env (et OPENCLIP_USER si tu veux un autre identifiant)."
+        )
     print(f"OpenClip → http://{host}:{port}")
-    uvicorn.run(create_app(out_root), host=host, port=port, log_level="warning")
+    # proxy_headers : garde le https d'origine derrière nginx (utile pour les redirections OAuth)
+    uvicorn.run(create_app(out_root), host=host, port=port, log_level="warning",
+                proxy_headers=True, forwarded_allow_ips="127.0.0.1")

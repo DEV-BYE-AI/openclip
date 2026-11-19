@@ -33,3 +33,22 @@ def test_projects_api(tmp_path: Path):
     assert client.get("/api/projects/../etc").status_code == 404
     assert "styles" in client.get("/api/meta").json()
     assert client.post("/api/jobs", json={"url": "pas un lien"}).status_code == 400
+
+
+def test_password_protection(tmp_path: Path, monkeypatch):
+    import base64
+    monkeypatch.setenv("OPENCLIP_PASSWORD", "s3cret")
+    client = TestClient(create_app(tmp_path))
+    assert client.get("/api/projects").status_code == 401
+    bad = base64.b64encode(b"admin:nope").decode()
+    assert client.get("/api/projects", headers={"Authorization": f"Basic {bad}"}).status_code == 401
+    good = base64.b64encode(b"admin:s3cret").decode()
+    assert client.get("/api/projects", headers={"Authorization": f"Basic {good}"}).status_code == 200
+
+
+def test_refuses_public_bind_without_password(tmp_path: Path, monkeypatch):
+    import pytest
+    from openclip.web.app import serve
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    with pytest.raises(SystemExit):
+        serve("0.0.0.0", 8999, tmp_path)
