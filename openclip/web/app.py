@@ -39,6 +39,7 @@ class JobIn(BaseModel):
     progress_bar: bool = True
     subtitles: bool = True
     auto_publish: list[str] = []
+    max_video_minutes: float | None = None
 
 
 class ClipPatch(BaseModel):
@@ -128,7 +129,7 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
     uploads: dict[str, tuple[Path, str]] = {}
     uploads_dir = out_root / "_sources" / "uploads"
 
-    def run_create(job: Job, body: JobIn) -> None:
+    def run_create(job: Job, body: JobIn, on_done=None) -> None:
         from ..pipeline import make_clips, publish
 
         lo, hi = PRESETS.get(body.preset, PRESETS["shorts"])
@@ -139,7 +140,14 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
             language=body.language or None, caption_style=body.caption_style,
             jump_cuts=body.jump_cuts, progress_bar=body.progress_bar,
         )
+        out = None
         try:
+            if body.max_video_minutes and not body.url.startswith("upload:"):
+                from ..download import video_duration
+                update(job, stage="download", progress=0.01, message="Vérification de la durée")
+                minutes = video_duration(body.url) / 60
+                if minutes > body.max_video_minutes:
+                    raise RuntimeError(f"vidéo trop longue ({minutes:.0f} min > {body.max_video_minutes:.0f})")
             local = uploads.get(body.url[len("upload:"):]) if body.url.startswith("upload:") else None
             out = make_clips(body.url, s, out_root,
                              lambda st, fr, msg: update(job, stage=st, progress=fr, message=msg),
@@ -153,6 +161,12 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         except Exception as exc:
             log.error("job %s : %s", job.id, traceback.format_exc())
             update(job, stage="error", error=str(exc), message="Échec")
+            out = None
+        if on_done:
+            try:
+                on_done(out)
+            except Exception:
+                log.exception("après le job %s", job.id)
 
     @app.post("/api/jobs")
     def create_job(body: JobIn):
@@ -392,6 +406,73 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         flow.fetch_token(authorization_response=str(request.url))
         youtube.save_credentials(flow.credentials)
         return RedirectResponse("/#/comptes")
+
+    # ---------- mode automatique ----------
+    from .. import automation
+
+    def auto_submit(url: str, options: dict, on_done) -> None:
+        job = Job(id=uuid.uuid4().hex[:10], url=url, kind="create", message="Automatique : en file d'attente")
+        jobs[job.id] = job
+        heavy.submit(run_create, job, JobIn(url=url, **options), on_done)
+
+    def auto_publish(project_dir: Path, index: int, target: str) -> dict:
+        from ..pipeline import publish_one
+        return publish_one(project_dir, index, settings, target, tiktok_mode=settings.tiktok_mode)
+
+    scheduler = automation.Scheduler(auto_submit, auto_publish, out_root)
+    app.state.scheduler = scheduler
+    if os.environ.get("OPENCLIP_SCHEDULER", "1") != "0":
+        scheduler.start()
+
+    @app.get("/api/automation")
+    def automation_get():
+        from ..uploaders import tiktok, youtube
+        cfg = automation.load_settings()
+        queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
+        return {**cfg, "queue": queue[:100], "status": scheduler.status,
+                "connected": {"tiktok": tiktok.is_connected(), "youtube": youtube.is_connected()}}
+
+    @app.put("/api/automation")
+    async def automation_put(request: Request):
+        changes = await request.json()
+        return automation.save_settings(changes)
+
+    @app.post("/api/automation/channels")
+    async def automation_add_channel(request: Request):
+        url = (await request.json()).get("url", "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(400, "colle le lien de la chaîne YouTube")
+        try:
+            return automation.add_channel(url)
+        except Exception as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/automation/channels/{channel_id}")
+    def automation_remove_channel(channel_id: str):
+        automation.remove_channel(channel_id)
+        return {"ok": True}
+
+    @app.post("/api/automation/check")
+    def automation_check():
+        return {"new_videos": scheduler.check_channels()}
+
+    @app.post("/api/automation/publish-next")
+    def automation_publish_next():
+        res = scheduler.publish_next()
+        if not res:
+            raise HTTPException(400, "aucun clip en attente")
+        return res
+
+    @app.post("/api/automation/queue")
+    async def automation_enqueue(request: Request):
+        body = await request.json()
+        d = project_dir(body.get("project", ""))
+        return {"added": automation.enqueue_project(d, float(body.get("min_score", 0)))}
+
+    @app.delete("/api/automation/queue/{project}/{clip}")
+    def automation_dequeue(project: str, clip: int):
+        automation.remove_from_queue(project, clip)
+        return {"ok": True}
 
     # ---------- applications TikTok / YouTube (publication) ----------
     @app.post("/api/settings/tiktok")

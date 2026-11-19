@@ -158,7 +158,20 @@ C'est prêt : l'analyse locale fonctionne sans clé. (Optionnel : `ANTHROPIC_API
   transcription locale (fichiers envoyés, vidéos sans sous-titres) : `WHISPER_MODEL=base` ou `tiny`
   dans `.env` (plus rapide, un peu moins précis).
 
-## Automatisation
+## Mode automatique (onglet « Auto »)
+
+- **Chaînes suivies** : colle le lien d'une chaîne YouTube ; toutes les 20 minutes OpenClip vérifie son
+  flux et transforme chaque nouvelle vidéo en clips (les vidéos déjà en ligne sont ignorées).
+- **File d'attente** : les clips au-dessus du score minimum y entrent, meilleurs d'abord. « Ajouter à la
+  file auto » sur un projet y met aussi ses clips.
+- **Heures de publication** : à chaque créneau (ex. 12:00, 18:00, 21:00, heure de Paris), le meilleur clip
+  en attente est publié sur TikTok et/ou YouTube Shorts (comptes connectés dans Comptes).
+- Désactivable à tout moment ; `OPENCLIP_SCHEDULER=0` coupe complètement la boucle de fond.
+
+Pour publier **sans aucune intervention**, les applications TikTok et Google doivent être validées par
+ces plateformes : avant, TikTok publie en privé (ou en brouillon) et YouTube en privé.
+
+## Automatisation par cron (ancienne méthode)
 
 Pour que ça tourne tout seul, ajoute tes liens dans `liens.txt` et programme une tâche cron :
 

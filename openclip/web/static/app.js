@@ -49,6 +49,7 @@ async function route() {
   if (hash.startsWith("#/p/")) return renderProject(decodeURIComponent(hash.slice(4)));
   if (hash === "#/projets") { $('[data-nav="projets"]').classList.add("active"); return renderProjects(); }
   if (hash === "#/comptes") { $('[data-nav="comptes"]').classList.add("active"); return renderAccounts(); }
+  if (hash === "#/auto") { $('[data-nav="auto"]').classList.add("active"); return renderAuto(); }
   if (hash === "#/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(); }
   if (hash === "#/connect/tiktok" || hash === "#/connect/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(hash.slice(10)); }
   $('[data-nav="home"]').classList.add("active");
@@ -272,7 +273,8 @@ async function renderProject(pid) {
           <div class="stat"><b>${clips.length}</b>clips</div>
           <div class="stat"><b>${Math.round(avg)}</b>score moyen</div>
           <div class="stat"><b>${published}</b>publiés</div>
-          <div class="stat"><a href="${esc(m.source.url)}" target="_blank" rel="noopener">Vidéo source ↗</a></div>
+          ${m.source.url ? `<div class="stat"><a href="${esc(m.source.url)}" target="_blank" rel="noopener">Vidéo source ↗</a></div>` : ""}
+          <button class="stat" id="to-queue" style="cursor:pointer">⏱ Ajouter à la file auto</button>
         </div>
       </div>
     </div>
@@ -281,6 +283,10 @@ async function renderProject(pid) {
     </div>
     <div class="clips" id="clips"></div>`;
 
+  $("#to-queue").onclick = async () => {
+    try { const r = await api("/api/automation/queue", { method: "POST", body: { project: m.id } }); toast(r.added ? `${r.added} clip(s) ajouté(s) à la file automatique` : "Déjà dans la file"); }
+    catch (err) { toast(err.message, true); }
+  };
   $(".toolbar").addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]");
     if (!b) return;
@@ -463,6 +469,97 @@ function openEditor(m, n) {
     } catch (err) { toast(err.message, true); }
   };
   dlg.showModal();
+}
+
+/* ------------------------------------------------------------------ mode automatique */
+async function renderAuto() {
+  let a;
+  try { a = await api("/api/automation"); } catch (e) { view.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const save = async (changes) => {
+    try { await api("/api/automation", { method: "PUT", body: changes }); renderAuto(); }
+    catch (err) { toast(err.message, true); }
+  };
+  const statusLabel = { pending: "En attente", published: "Publié ✓", failed: "Échec" };
+  const missing = a.targets.filter((t) => !a.connected[t]);
+  const pending = a.queue.filter((q) => q.status === "pending").length;
+  view.innerHTML = `
+    <div class="proj-head">
+      <div>
+        <h1 style="font-size:34px">Mode automatique</h1>
+        <p class="muted" style="max-width:640px">OpenClip surveille tes chaînes YouTube, crée les clips de chaque nouvelle vidéo et publie le meilleur clip en attente à chaque créneau horaire.</p>
+      </div>
+      <label class="switch" style="font-size:16px;font-weight:600"><input type="checkbox" id="auto-on" ${a.enabled ? "checked" : ""}> ${a.enabled ? "Activé" : "Désactivé"}</label>
+    </div>
+    ${missing.length ? `<div class="tip" style="color:var(--amber);margin-top:12px">⚠️ Non connecté : ${missing.map((t) => t === "tiktok" ? "TikTok" : "YouTube").join(", ")}. Les publications vers ${missing.length > 1 ? "ces comptes" : "ce compte"} échoueront. <a href="#/comptes">Connecter</a></div>` : ""}
+
+    <div class="section-title"><h2>Chaînes suivies</h2><button class="btn btn-sm btn-ghost" id="auto-check">Vérifier maintenant</button></div>
+    <form class="url-row" id="auto-add"><input id="auto-url" placeholder="https://www.youtube.com/@nomdelachaine" autocomplete="off"><button class="btn btn-primary" style="padding:12px 18px">Suivre</button></form>
+    <div class="jobs" style="margin-top:10px">${a.channels.length ? a.channels.map((c) => `
+      <div class="job" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div><b>${esc(c.name)}</b><div class="muted" style="font-size:12px">Seules les nouvelles vidéos sont traitées</div></div>
+        <button class="btn btn-sm btn-ghost" data-unfollow="${esc(c.channel_id)}">Retirer</button>
+      </div>`).join("") : `<div class="empty">Aucune chaîne. Ajoute le lien d'une chaîne dont tu as l'autorisation de clipper.</div>`}</div>
+
+    <div class="section-title"><h2>Réglages</h2></div>
+    <div class="launcher" style="margin:0;max-width:none"><div class="options">
+      <div><div class="opt-label">Clips par vidéo</div>${chips("clips_per_video", [[1, "1"], [2, "2"], [3, "3"], [5, "5"]], a.clips_per_video)}</div>
+      <div><div class="opt-label">Score minimum pour publier</div>${chips("min_score", [[40, "40"], [55, "55"], [70, "70"], [80, "80"]], a.min_score)}</div>
+      <div><div class="opt-label">Durée des clips</div>${chips("preset", Object.keys(PRESET_INFO).map((k) => [k, PRESET_INFO[k][0], PRESET_INFO[k][1]]), a.preset)}</div>
+      <div><div class="opt-label">Cadrage</div>${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], a.crop_mode)}</div>
+      <div><div class="opt-label">Style des sous-titres</div>${chips("caption_style", Object.entries(META.styles).map(([k, l]) => [k, l.split(" — ")[0]]), a.caption_style)}</div>
+      <div><div class="opt-label">Vidéos sources max</div>${chips("max_video_minutes", [[30, "30 min"], [60, "1 h"], [90, "1 h 30"], [180, "3 h"]], a.max_video_minutes)}</div>
+      <div class="opt-wide"><div class="opt-label">Publier sur</div>
+        <div class="switches">
+          <label class="switch"><input type="checkbox" data-target="tiktok" ${a.targets.includes("tiktok") ? "checked" : ""}> TikTok</label>
+          <label class="switch"><input type="checkbox" data-target="youtube" ${a.targets.includes("youtube") ? "checked" : ""}> YouTube Shorts</label>
+        </div></div>
+      <div class="opt-wide"><div class="opt-label">Heures de publication (${esc(a.timezone)})</div>
+        <div class="chips">${a.slots.map((s) => `<button type="button" class="chip" aria-pressed="true" data-slot="${s}">${s} ✕</button>`).join("")}
+          <input type="time" id="slot-new" class="chip" style="color:var(--text)"><button type="button" class="btn btn-sm" id="slot-add">Ajouter</button></div>
+        <div class="tip">À chaque heure, le meilleur clip en attente est publié. 1 à 3 publications par jour, c'est l'idéal.</div></div>
+    </div></div>
+
+    <div class="section-title"><h2>File d'attente <span class="muted" style="font-size:15px">· ${pending} en attente</span></h2><button class="btn btn-sm btn-ghost" id="auto-now" ${pending ? "" : "disabled"}>Publier le prochain maintenant</button></div>
+    <div class="jobs">${a.queue.length ? a.queue.map((q) => `
+      <div class="job ${q.status === "failed" ? "error" : ""}" style="display:flex;gap:12px;align-items:center">
+        <div class="score" style="--p:${Math.round(q.score)};--c:${scoreColor(q.score)};width:44px;height:44px;flex:none"><span style="font-size:14px">${Math.round(q.score)}</span></div>
+        <div style="flex:1;min-width:0">
+          <a href="#/p/${encodeURIComponent(q.project)}" style="font-weight:600;text-decoration:none">${esc(q.title)}</a>
+          <div class="muted" style="font-size:12px">${esc(statusLabel[q.status] || q.status)} · ${esc(q.source || "")}</div>
+          ${q.errors && Object.keys(q.errors).length ? `<div class="err">${esc(Object.entries(q.errors).map(([k, v]) => k + " : " + v).join(" · "))}</div>` : ""}
+        </div>
+        ${q.status === "pending" ? `<button class="btn btn-sm btn-ghost" data-dequeue="${esc(q.project)}/${q.clip}">Retirer</button>` : ""}
+      </div>`).join("") : `<div class="empty">Vide. Les clips des nouvelles vidéos arrivent ici, ou utilise « Ajouter à la file auto » sur un projet.</div>`}</div>`;
+
+  $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
+  view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-v]"); if (!b) return;
+    const num = ["clips_per_video", "min_score", "max_video_minutes"].includes(g.dataset.group);
+    save({ [g.dataset.group]: num ? Number(b.dataset.v) : b.dataset.v });
+  }));
+  view.querySelectorAll("[data-target]").forEach((c) => (c.onchange = () => save({ targets: [...view.querySelectorAll("[data-target]:checked")].map((x) => x.dataset.target) })));
+  view.querySelectorAll("[data-slot]").forEach((b) => (b.onclick = () => save({ slots: a.slots.filter((s) => s !== b.dataset.slot) })));
+  $("#slot-add").onclick = () => { const v = $("#slot-new").value; if (v) save({ slots: [...a.slots, v] }); };
+  $("#auto-add").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Recherche…";
+    try { const c = await api("/api/automation/channels", { method: "POST", body: { url: $("#auto-url").value.trim() } }); toast(`Chaîne suivie : ${c.name}`); renderAuto(); }
+    catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Suivre"; }
+  };
+  view.querySelectorAll("[data-unfollow]").forEach((b) => (b.onclick = async () => { if (!confirm("Ne plus suivre cette chaîne ?")) return; await api(`/api/automation/channels/${b.dataset.unfollow}`, { method: "DELETE" }); renderAuto(); }));
+  view.querySelectorAll("[data-dequeue]").forEach((b) => (b.onclick = async () => { await api(`/api/automation/queue/${b.dataset.dequeue}`, { method: "DELETE" }); renderAuto(); }));
+  $("#auto-check").onclick = async (e) => {
+    e.target.disabled = true;
+    try { const r = await api("/api/automation/check", { method: "POST" }); toast(r.new_videos ? `${r.new_videos} nouvelle(s) vidéo(s) : clips en préparation` : "Pas de nouvelle vidéo"); }
+    catch (err) { toast(err.message, true); }
+    e.target.disabled = false;
+  };
+  $("#auto-now").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Publication…";
+    try { const r = await api("/api/automation/publish-next", { method: "POST" }); toast(Object.keys(r.results).length ? `Publié : ${r.title}` : "Échec de la publication", !Object.keys(r.results).length); }
+    catch (err) { toast(err.message, true); }
+    renderAuto();
+  };
 }
 
 /* ------------------------------------------------------------------ comptes */

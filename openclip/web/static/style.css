@@ -226,6 +226,12 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; margin: 4p
 .typebar input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; outline: none; }
 #screen-wrap .chips, #screen-wrap .note, #b-finish { max-width: 480px; margin-left: auto; margin-right: auto; }
 
+@media (max-width: 460px) {
+  .brand-name { display: none; }
+  .topbar nav { gap: 0; }
+  .topbar nav a { padding: 7px 9px; font-size: 14px; }
+}
+
 @media (max-width: 640px) {
   .topbar { gap: 10px; }
   .brand-sub { display: none; }

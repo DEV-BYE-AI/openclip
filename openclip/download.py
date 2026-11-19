@@ -192,3 +192,14 @@ def parse_json3(path: Path):
             segments.append(Segment(cur[0].start, cur[-1].end, " ".join(x.text for x in cur), cur))
             cur = []
     return segments
+
+
+def video_duration(url: str) -> float:
+    """Durée d'une vidéo YouTube sans la télécharger (0 si inconnue)."""
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
+    cookies = cookies_path()
+    if cookies:
+        opts["cookiefile"] = str(cookies)
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False, process=False)
+    return float(info.get("duration") or 0)
