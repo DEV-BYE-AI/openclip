@@ -265,7 +265,13 @@ def publish_one(clip_dir: Path, index: int, settings: Settings, target: str, *,
     source = manifest["source"]
     credit = f"🎬 Source : {source.get('uploader') or ''} {source.get('url', '')}".strip()
     video = clip_dir / clip["file"]
-    if target == "tiktok":
+    via = {x.strip() for x in settings.upload_post_platforms.split(",") if x.strip()}
+    if target in via and settings.upload_post_key:
+        from .uploaders import uploadpost
+        desc = caption_for({**clip, "title": ""}, credit)
+        res = uploadpost.upload(settings.upload_post_key, settings.upload_post_user, video, [target],
+                                caption_for(clip, credit) if target == "tiktok" else clip["title"], desc)
+    elif target == "tiktok":
         from .uploaders import tiktok
         res = tiktok.upload(settings, video, caption_for(clip, credit),
                             mode=tiktok_mode, privacy=privacy)

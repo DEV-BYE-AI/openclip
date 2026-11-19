@@ -45,6 +45,10 @@ class Settings:
     )
     youtube_client_secrets: str = os.environ.get("YOUTUBE_CLIENT_SECRETS", "client_secret.json")
     tiktok_mode: str = os.environ.get("TIKTOK_MODE", "draft")  # draft (brouillon) ou direct
+    # Upload-Post : service tiers qui publie sur TikTok / YouTube avec une clé API
+    upload_post_key: str = os.environ.get("UPLOAD_POST_API_KEY", "")
+    upload_post_user: str = os.environ.get("UPLOAD_POST_USER", "")
+    upload_post_platforms: str = os.environ.get("UPLOAD_POST_PLATFORMS", "")  # ex. "tiktok,youtube"
     clip: ClipSettings = field(default_factory=ClipSettings)
 
     def __post_init__(self) -> None:
@@ -52,7 +56,8 @@ class Settings:
 
     def reload_credentials(self) -> None:
         saved = load_credentials()
-        for key in ("tiktok_client_key", "tiktok_client_secret", "tiktok_redirect_uri", "tiktok_mode"):
+        for key in ("tiktok_client_key", "tiktok_client_secret", "tiktok_redirect_uri", "tiktok_mode",
+                    "upload_post_key", "upload_post_user", "upload_post_platforms"):
             if saved.get(key):
                 setattr(self, key, saved[key])
         if YOUTUBE_CLIENT_FILE.exists():

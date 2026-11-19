@@ -176,3 +176,31 @@ def test_delete_project(tmp_path: Path, monkeypatch):
     assert not (tmp_path / "abc123").exists()
     assert not (tmp_path / "_sources" / "abc123.transcript.json").exists()
     assert (tmp_path / "_sources" / "abc123.mp4").exists()  # vidéo gardée en cache
+
+
+def test_upload_post_route(tmp_path: Path, monkeypatch):
+    import openclip.config as config
+    from openclip.pipeline import publish_one
+    from openclip.uploaders import uploadpost
+
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    monkeypatch.setattr(config, "TOKENS_DIR", tmp_path / "home" / "tokens")
+    monkeypatch.setattr(config, "CREDENTIALS_FILE", tmp_path / "home" / "credentials.json")
+    make_project(tmp_path)
+    sent = {}
+
+    class Resp:
+        status_code = 200
+        def json(self):
+            return {"success": True, "results": {"tiktok": {"success": True}}}
+
+    def fake_post(url, headers, data, files, timeout):
+        sent.update(url=url, auth=headers["Authorization"], data=data, name=files["video"][0])
+        return Resp()
+
+    monkeypatch.setattr(uploadpost.requests, "post", fake_post)
+    config.save_credentials(upload_post_key="KEY123", upload_post_user="gta6", upload_post_platforms="tiktok")
+    res = publish_one(tmp_path / "abc123", 1, config.Settings(), "tiktok")
+    assert res["via"] == "upload-post" and sent["auth"] == "Apikey KEY123"
+    assert ("user", "gta6") in sent["data"] and ("platform[]", "tiktok") in sent["data"]
+    assert sent["url"].endswith("/api/upload") and sent["name"] == "clip_01.mp4"

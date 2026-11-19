@@ -435,7 +435,7 @@ async function onClipAction(e, m) {
     return;
   }
   if (act === "tiktok" || act === "youtube") {
-    if (!META.accounts[act]) { toast(`Connecte d'abord ${act === "tiktok" ? "TikTok" : "YouTube"}`, true); location.hash = "#/comptes"; return; }
+    if (!META.accounts[act] && !(META.accounts.upload_post && META.accounts.upload_post_platforms.includes(act))) { toast(`Connecte d'abord ${act === "tiktok" ? "TikTok" : "YouTube"}`, true); location.hash = "#/comptes"; return; }
     if (clip.uploads?.[act] && !confirm("Ce clip est déjà publié. Le republier ?")) return;
     btn.disabled = true;
     btn.textContent = "Envoi…";
@@ -655,6 +655,26 @@ async function renderAccounts() {
         <div class="muted">${a.claude ? "Claude choisit les moments et rédige les accroches." : "Sans clé, OpenClip utilise son analyse locale gratuite (accroche, rythme, énergie de la voix, émotions, chiffres)."}</div>
         ${a.claude ? "" : `<div class="note">Pour des textes encore plus naturels, tu peux ajouter une clé <code>ANTHROPIC_API_KEY</code> dans <code>.env</code> (payant à l'usage).</div>`}
       </div>
+      <div class="account" style="border-color:#3a3020"><h3>Upload-Post <span class="status ${a.upload_post ? "ok" : ""}">${a.upload_post ? "Configuré" : "Le plus simple"}</span></h3>
+        <div class="muted">Publie sur TikTok et YouTube sans créer d'application : tu connectes tes comptes sur upload-post.com, puis tu colles ici ta clé API. Les vidéos TikTok peuvent être publiques tout de suite.</div>
+        <details ${a.upload_post ? "" : "open"}>
+          <summary>${a.upload_post ? "Réglages" : "Comment faire (5 min)"}</summary>
+          <ol class="guide">
+            <li>Crée un compte sur <b>upload-post.com</b> (forfait gratuit : quelques envois par mois).</li>
+            <li>Dans <b>Manage Users / Profiles</b>, crée un profil (ex. <code>gta6</code>) puis connecte <b>TikTok</b> et <b>YouTube</b> à ce profil.</li>
+            <li>Dans <b>API Keys</b>, génère une clé et copie-la.</li>
+            <li>Remplis ci-dessous, coche les plateformes à publier via Upload-Post, puis Enregistrer.</li>
+          </ol>
+          <form class="ed" id="up-form" style="padding:0">
+            <label>Clé API<input name="api_key" type="password" placeholder="${a.upload_post ? "•••••• (inchangée)" : ""}" autocomplete="off"></label>
+            <label>Nom du profil Upload-Post<input name="user" value="${esc(a.upload_post_user || "")}" placeholder="gta6" autocomplete="off"></label>
+            <div class="switches">
+              ${["tiktok", "youtube", "instagram"].map((p) => `<label class="switch"><input type="checkbox" name="pf" value="${p}" ${(a.upload_post_platforms || []).includes(p) ? "checked" : ""}> ${{ tiktok: "TikTok", youtube: "YouTube", instagram: "Instagram" }[p]}</label>`).join("")}
+            </div>
+            <button class="btn btn-primary" style="padding:12px 18px">Enregistrer</button>
+          </form>
+        </details>
+      </div>
       <div class="account"><h3>TikTok ${st(a.tiktok)}</h3>
         <div class="muted">Publie tes clips sur ton compte TikTok.</div>
         ${a.tiktok_configured ? (a.tiktok_redirect_uri.startsWith(location.origin + "/")
@@ -743,6 +763,17 @@ document.addEventListener("click", async (e) => {
   try {
     const r = await api("/api/connect/tiktok?direct=true", { method: "POST" });
     location.href = r.url;  // page officielle TikTok, puis retour sur OpenClip
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "up-form") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api("/api/settings/upload-post", { method: "POST", body: { api_key: f.get("api_key"), user: f.get("user"), platforms: f.getAll("pf") } });
+    toast("Upload-Post enregistré ✓");
+    META = await api("/api/meta");
+    renderAccounts();
   } catch (err) { toast(err.message, true); }
 });
 document.addEventListener("submit", async (e) => {

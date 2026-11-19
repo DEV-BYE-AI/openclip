@@ -59,6 +59,12 @@ class PublishIn(BaseModel):
     privacy: str | None = None
 
 
+class UploadPostIn(BaseModel):
+    api_key: str | None = None
+    user: str | None = None
+    platforms: list[str] = []
+
+
 class TikTokSettingsIn(BaseModel):
     client_key: str | None = None
     client_secret: str | None = None
@@ -398,6 +404,9 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
                 "tiktok_mode": settings.tiktok_mode,
                 "youtube": youtube.is_connected(),
                 "youtube_configured": Path(settings.youtube_client_secrets).exists(),
+                "upload_post": bool(settings.upload_post_key and settings.upload_post_user),
+                "upload_post_user": settings.upload_post_user,
+                "upload_post_platforms": [x for x in settings.upload_post_platforms.split(",") if x],
             },
             "styles": {k: v.label for k, v in STYLES.items()},
             "presets": PRESETS,
@@ -475,7 +484,8 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         cfg = automation.load_settings()
         queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
         return {**cfg, "queue": queue[:100], "status": scheduler.status,
-                "connected": {"tiktok": tiktok.is_connected(), "youtube": youtube.is_connected()}}
+                "connected": {t: bool(mod.is_connected() or (settings.upload_post_key and t in settings.upload_post_platforms))
+                              for t, mod in (("tiktok", tiktok), ("youtube", youtube))}}
 
     @app.put("/api/automation")
     async def automation_put(request: Request):
@@ -555,6 +565,21 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
                          tiktok_redirect_uri=(body.redirect_uri or "").strip() or None,
                          tiktok_mode=body.mode)
         settings.reload_credentials()
+        return {"ok": True}
+
+    @app.post("/api/settings/upload-post")
+    def save_upload_post(body: UploadPostIn):
+        from ..config import save_credentials
+        from ..uploaders import uploadpost
+        key = (body.api_key or "").strip()
+        if key and not uploadpost.check_key(key):
+            raise HTTPException(400, "clé API Upload-Post refusée")
+        platforms = [p for p in body.platforms if p in {"tiktok", "youtube", "instagram"}]
+        save_credentials(upload_post_key=key or None, upload_post_user=(body.user or "").strip() or None,
+                         upload_post_platforms=",".join(platforms))
+        settings.reload_credentials()
+        if not platforms:
+            settings.upload_post_platforms = ""
         return {"ok": True}
 
     @app.post("/api/settings/youtube-client")
