@@ -702,6 +702,7 @@ async function renderAuto() {
 async function renderAccounts() {
   META = await api("/api/meta");
   const cookies = await api("/api/cookies");
+  setTimeout(refreshVerifyList, 0);
   const a = META.accounts;
   const st = (ok, label = "Connecté") => `<span class="status ${ok ? "ok" : ""}">${ok ? label : "Non connecté"}</span>`;
   view.innerHTML = `
@@ -749,6 +750,11 @@ async function renderAccounts() {
             <li>Onglet <b>Sandbox</b> : ajoute ton compte TikTok comme « Target user » pour tester tout de suite.</li>
             <li>Copie ici le <b>Client key</b> et le <b>Client secret</b>.</li>
           </ol>
+          <div class="note" style="margin-bottom:8px"><b>« This URL is not verified »</b> : dans TikTok, « Verify URL properties » → <b>URL prefix</b> → <code>${esc(location.origin)}/</code> → télécharge le fichier <code>tiktok….txt</code>, envoie-le ici, puis clique « Verify » chez TikTok.</div>
+          <div class="chips" style="margin-bottom:12px">
+            <label class="btn btn-sm">Envoyer le fichier de vérification<input type="file" id="verify-file" accept=".txt,.html" hidden></label>
+            <span id="verify-list" class="muted" style="font-size:12px"></span>
+          </div>
           <form class="ed" id="tt-form" style="padding:0">
             <label>Client key<input name="client_key" value="${esc(a.tiktok_client_key || "")}" autocomplete="off"></label>
             <label>Client secret<input name="client_secret" type="password" placeholder="${a.tiktok_configured ? "•••••• (inchangé)" : ""}" autocomplete="off"></label>
@@ -821,6 +827,24 @@ document.addEventListener("click", async (e) => {
     const r = await api("/api/connect/tiktok?direct=true", { method: "POST" });
     location.href = r.url;  // page officielle TikTok, puis retour sur OpenClip
   } catch (err) { toast(err.message, true); }
+});
+async function refreshVerifyList() {
+  const el = $("#verify-list");
+  if (!el) return;
+  const files = await api("/api/verification-files").catch(() => []);
+  el.innerHTML = files.length ? "En ligne : " + files.map((f) => `<a href="/${esc(f)}" target="_blank" rel="noopener">${esc(f)}</a>`).join(", ") : "";
+}
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "verify-file" || !e.target.files[0]) return;
+  const file = e.target.files[0];
+  try {
+    const res = await fetch("/api/verification-files", { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: await file.text() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Fichier refusé");
+    toast(`Fichier en ligne : ${location.origin}${data.url} — clique « Verify » chez TikTok`);
+    refreshVerifyList();
+  } catch (err) { toast(err.message, true); }
+  e.target.value = "";
 });
 document.addEventListener("submit", async (e) => {
   if (e.target.id !== "up-form") return;

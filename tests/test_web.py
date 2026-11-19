@@ -204,3 +204,23 @@ def test_upload_post_route(tmp_path: Path, monkeypatch):
     assert res["via"] == "upload-post" and sent["auth"] == "Apikey KEY123"
     assert ("user", "gta6") in sent["data"] and ("platform[]", "tiktok") in sent["data"]
     assert sent["url"].endswith("/api/upload") and sent["name"] == "clip_01.mp4"
+
+
+def test_verification_file_is_public(tmp_path: Path, monkeypatch):
+    import base64
+
+    import openclip.config as config
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    monkeypatch.setenv("OPENCLIP_PASSWORD", "pw")
+    client = TestClient(create_app(tmp_path / "out"))
+    auth = {"Authorization": "Basic " + base64.b64encode(b"admin:pw").decode()}
+    assert client.get("/tiktokAbC123.txt").status_code == 401  # n'existe pas : protégé comme le reste
+    r = client.post("/api/verification-files", content=b"tiktok-developers-site-verification=XYZ",
+                    headers={**auth, "X-Filename": "tiktokAbC123.txt"})
+    assert r.status_code == 200
+    pub = client.get("/tiktokAbC123.txt")  # sans mot de passe
+    assert pub.status_code == 200 and pub.text == "tiktok-developers-site-verification=XYZ"
+    bad = client.post("/api/verification-files", content=b"x", headers={**auth, "X-Filename": "../evil.txt"})
+    assert bad.status_code == 400
+    assert client.get("/api/projects").status_code == 401
+    assert client.get("/", headers=auth).status_code == 200  # la page d'accueil n'est pas capturée

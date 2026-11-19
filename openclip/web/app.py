@@ -87,6 +87,23 @@ class Job:
     created_at: float = field(default_factory=time.time)
 
 
+_VERIFY_NAME = __import__("re").compile(r"^[A-Za-z0-9_-]{4,100}\.(txt|html)$")
+
+
+def _verify_dir() -> Path:
+    from .. import config
+    return config.HOME_DIR / "verification"
+
+
+def _verification_file(path: str) -> Path | None:
+    """Fichier de vérification de site (TikTok, Google…) servi à la racine, ex. /tiktokAbC123.txt."""
+    name = path.lstrip("/")
+    if "/" in name or not _VERIFY_NAME.match(name):
+        return None
+    f = _verify_dir() / name
+    return f if f.is_file() else None
+
+
 def create_app(out_root: Path = Path("output"), settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     out_root.mkdir(parents=True, exist_ok=True)
@@ -101,7 +118,8 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         Seules les pages publiques exigées par TikTok / Google (mentions légales, page de retour
         après autorisation) restent accessibles sans mot de passe.
         """
-        if password and not request.url.path.startswith(("/legal/", "/callback/")):
+        public = request.url.path.startswith(("/legal/", "/callback/")) or bool(_verification_file(request.url.path))
+        if password and not public:
             import base64
             ok = False
             header = request.headers.get("authorization", "")
@@ -819,6 +837,41 @@ révoqué à tout moment depuis les paramètres TikTok ou Google du compte.</p>
                                f"<p>{escape(res['error'])}</p><p><a href='/#/comptes'>← Revenir dans OpenClip</a></p>")
         return public_page("Autorisation reçue",
                            "<p>Tu peux revenir dans OpenClip : la connexion se termine automatiquement.</p>")
+
+    # ---------- fichiers de vérification de propriété (URL prefix TikTok / Google) ----------
+    @app.get("/api/verification-files")
+    def list_verification_files():
+        d = _verify_dir()
+        return sorted(f.name for f in d.glob("*")) if d.exists() else []
+
+    @app.post("/api/verification-files")
+    async def add_verification_file(request: Request):
+        import urllib.parse
+        name = urllib.parse.unquote(request.headers.get("x-filename", "")).strip()
+        if not _VERIFY_NAME.match(name):
+            raise HTTPException(400, "nom de fichier invalide (attendu : par ex. tiktokXXXX.txt)")
+        body = await request.body()
+        if not body or len(body) > 10_000:
+            raise HTTPException(400, "fichier vide ou trop gros")
+        d = _verify_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_bytes(body)
+        return {"name": name, "url": f"/{name}"}
+
+    @app.delete("/api/verification-files/{name}")
+    def delete_verification_file(name: str):
+        f = _verification_file("/" + name)
+        if f:
+            f.unlink()
+        return {"ok": True}
+
+    @app.get("/{name}", include_in_schema=False)
+    def serve_verification_file(name: str):
+        f = _verification_file("/" + name)
+        if not f:
+            raise HTTPException(404, "introuvable")
+        media = "text/html" if f.suffix == ".html" else "text/plain"
+        return Response(f.read_bytes(), media_type=media)
 
     app.mount("/media", StaticFiles(directory=out_root), name="media")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
