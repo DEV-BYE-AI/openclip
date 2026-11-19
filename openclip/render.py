@@ -28,7 +28,11 @@ def face_center_x(path: Path, start: float, end: float, samples: int = 12) -> fl
         log.info("opencv non installé (pip install 'openclip[face]') — recadrage centré.")
         return None
 
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    try:
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    except AttributeError:  # OpenCV 5 n'a plus ce détecteur : on recadre au centre
+        log.warning("détecteur de visage indisponible (OpenCV %s) — recadrage centré", cv2.__version__)
+        return None
     cap = cv2.VideoCapture(str(path))
     xs: list[float] = []
     try:
@@ -146,7 +150,12 @@ def render_clip(src: Path, start: float, end: float, out: Path, *, mode: str = "
     """Rend le clip. `intervals` (absolus, issus de keep_intervals) active les jump cuts."""
     src_w, src_h = probe(src)
     audio = has_audio(src)
-    center = face_center_x(src, start, end) if mode == "face" else None
+    center = None
+    if mode == "face":
+        try:
+            center = face_center_x(src, start, end)
+        except Exception as exc:  # la détection ne doit jamais empêcher le montage
+            log.warning("détection de visage impossible (%s) — recadrage centré", exc)
     rel = [(a - start, b - start) for a, b in intervals] if intervals else None
     duration = sum(b - a for a, b in rel) if rel else end - start
     graph = build_graph(src_w, src_h, mode, center, out_w, out_h, ass, intervals=rel,
