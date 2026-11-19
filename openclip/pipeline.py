@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import ClipSettings, Settings
-from .download import download
+from .download import local_source, safe_download
 from .highlights import find_highlights
 from .render import keep_intervals, remap_words, render_clip, thumbnail
 from .subtitles import build_ass
@@ -26,11 +26,16 @@ def _noop(stage: str, frac: float, msg: str) -> None:
     log.info("[%s %3.0f%%] %s", stage, frac * 100, msg)
 
 
-def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress = _noop) -> Path:
+def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress = _noop,
+               local_file: Path | None = None, local_title: str = "") -> Path:
     cs = settings.clip
     work = out_root / "_sources"
-    progress("download", 0.02, "Téléchargement de la vidéo")
-    src = download(url, work)
+    if local_file:
+        progress("download", 0.05, "Lecture du fichier envoyé")
+        src = local_source(local_file, local_title or local_file.stem)
+    else:
+        progress("download", 0.02, "Téléchargement de la vidéo")
+        src = safe_download(url, work)
     out_dir = out_root / src.video_id
     out_dir.mkdir(parents=True, exist_ok=True)
 

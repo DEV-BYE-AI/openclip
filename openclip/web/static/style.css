@@ -68,6 +68,7 @@ h1, h2, h3 { font-family: var(--display); margin: 0; letter-spacing: -.02em; }
 .btn-sm { padding: 8px 12px; border-radius: 10px; font-size: 13px; }
 .btn-ghost { background: transparent; border: 1px solid var(--line); }
 
+.file-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px 0; flex-wrap: wrap; }
 .options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; padding: 20px 12px 12px; }
 .opt-label { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

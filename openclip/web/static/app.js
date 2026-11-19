@@ -86,6 +86,11 @@ function renderHome() {
         <input id="url" type="url" required placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
         <button class="btn btn-primary" id="go">Trouver les clips →</button>
       </div>
+      <div class="file-row">
+        <span class="muted">ou</span>
+        <label class="btn btn-sm btn-ghost">📁 Envoyer un fichier vidéo<input type="file" id="file" accept="video/*" hidden></label>
+        <span id="up-status" class="muted"></span>
+      </div>
       <div class="options">
         <div>
           <div class="opt-label">Durée</div>
@@ -162,9 +167,39 @@ function renderHome() {
     $("#go").disabled = false;
   });
 
+  $("#file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = $("#up-status");
+    try {
+      const up = await uploadFile(file, (pct) => (status.textContent = `Envoi… ${pct}%`));
+      status.textContent = "";
+      await api("/api/jobs", { method: "POST", body: { ...p, url: "upload:" + up.id, auto_publish: p.auto_publish.filter((t) => META.accounts[t]), language: p.language || null } });
+      toast("Fichier reçu, c'est parti !");
+      refreshJobs();
+    } catch (err) { status.textContent = ""; toast(err.message, true); }
+    e.target.value = "";
+  });
+
   refreshJobs();
   pollTimer = setInterval(refreshJobs, 1500);
   loadRecent();
+}
+
+function uploadFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/uploads");
+    xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      xhr.status < 300 ? resolve(data) : reject(new Error(data.detail || "Échec de l'envoi"));
+    };
+    xhr.onerror = () => reject(new Error("Connexion perdue pendant l'envoi"));
+    xhr.send(file);
+  });
 }
 
 async function loadRecent() {
@@ -390,6 +425,7 @@ function openEditor(m, n) {
 /* ------------------------------------------------------------------ comptes */
 async function renderAccounts() {
   META = await api("/api/meta");
+  const cookies = await api("/api/cookies");
   const a = META.accounts;
   const st = (ok, label = "Connecté") => `<span class="status ${ok ? "ok" : ""}">${ok ? label : "Non connecté"}</span>`;
   view.innerHTML = `
@@ -413,6 +449,16 @@ async function renderAccounts() {
         : `<div class="note">Place ton fichier OAuth Google <code>client_secret.json</code> à la racine du projet.</div>`}
       </div>
     </div>
+    <div class="account" style="margin-top:16px">
+      <h3>Téléchargement YouTube <span class="status ${cookies.present ? "ok" : ""}">${cookies.present ? "Cookies ajoutés" : "Sans cookies"}</span></h3>
+      <div class="muted">YouTube bloque souvent les serveurs (« confirm you're not a bot »). Avec les cookies d'un navigateur connecté à YouTube, le téléchargement repasse.</div>
+      ${cookies.present ? `<div class="note">Mis à jour le ${new Date(cookies.updated_at * 1000).toLocaleString("fr-FR")}. Ils expirent au bout de quelques semaines : renvoie-en si l'erreur revient.</div>` : ""}
+      <div class="chips">
+        <label class="btn btn-sm">${cookies.present ? "Remplacer" : "Envoyer"} cookies.txt<input type="file" id="cookies" accept=".txt,text/plain" hidden></label>
+        ${cookies.present ? `<button class="btn btn-sm btn-ghost" id="cookies-del">Supprimer</button>` : ""}
+      </div>
+      <div class="note">Comment l'obtenir : sur un ordinateur, connecte-toi à YouTube (idéalement avec un compte secondaire), installe l'extension « Get cookies.txt LOCALLY » (Chrome ou Firefox), ouvre youtube.com, clique sur l'extension puis « Export ». Envoie ici le fichier obtenu. Ne le partage avec personne : il donne accès au compte.</div>
+    </div>
     <section class="money">
       <h2>Transformer les vues en revenus</h2>
       <ol>
@@ -423,6 +469,22 @@ async function renderAccounts() {
       </ol>
     </section>`;
 }
+
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "cookies" || !e.target.files[0]) return;
+  try {
+    const res = await fetch("/api/cookies", { method: "POST", body: await e.target.files[0].text() });
+    if (!res.ok) throw new Error((await res.json()).detail || "Fichier refusé");
+    toast("Cookies enregistrés ✓");
+    renderAccounts();
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "cookies-del") return;
+  await api("/api/cookies", { method: "DELETE" });
+  toast("Cookies supprimés");
+  renderAccounts();
+});
 
 /* ------------------------------------------------------------------ démarrage */
 (async () => {

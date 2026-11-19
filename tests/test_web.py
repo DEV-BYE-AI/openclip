@@ -52,3 +52,50 @@ def test_refuses_public_bind_without_password(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
     with pytest.raises(SystemExit):
         serve("0.0.0.0", 8999, tmp_path)
+
+
+def test_cookies_and_upload(tmp_path: Path, monkeypatch):
+    import subprocess
+    import time
+
+    import openclip.config as config
+    import openclip.pipeline as pipeline
+    from openclip.transcribe import Segment, Word
+
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    monkeypatch.delenv("YTDLP_COOKIES", raising=False)
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    monkeypatch.setattr(config, "TOKENS_DIR", tmp_path / "home" / "tokens")
+    client = TestClient(create_app(tmp_path / "out"))
+
+    assert client.get("/api/cookies").json()["present"] is False
+    assert client.post("/api/cookies", content=b"pas des cookies").status_code == 400
+    good = ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tabc\n"
+    assert client.post("/api/cookies", content=good.encode()).json()["present"] is True
+    assert (tmp_path / "home" / "youtube-cookies.txt").read_text().startswith("# Netscape")
+    assert client.delete("/api/cookies").json()["present"] is False
+
+    # vidéo envoyée -> clips, sans YouTube (transcription simulée)
+    src = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25",
+                    "-f", "lavfi", "-i", "sine=frequency=300", "-t", "45", "-shortest", str(src)], check=True)
+    words = [Word(i * 0.4, i * 0.4 + 0.3, w) for i, w in enumerate(("Personne ne te dit ça mais voici le secret "
+             "pour gagner 1000 euros ? " * 12).split())]
+    segs = [Segment(words[k].start, words[min(k + 9, len(words) - 1)].end,
+                    " ".join(w.text for w in words[k:k + 10]), words[k:k + 10]) for k in range(0, len(words), 10)]
+    monkeypatch.setattr(pipeline, "transcribe", lambda *a, **k: segs)
+
+    assert client.post("/api/uploads", content=b"x", headers={"X-Filename": "a.exe"}).status_code == 400
+    up = client.post("/api/uploads", content=src.read_bytes(), headers={"X-Filename": "Ma%20vid%C3%A9o.mp4"}).json()
+    job = client.post("/api/jobs", json={"url": "upload:" + up["id"], "num_clips": 1, "min_seconds": 20,
+                                         "max_seconds": 40, "crop_mode": "center"}).json()
+    assert job["url"] == "📁 Ma vidéo"
+    for _ in range(120):
+        j = next(x for x in client.get("/api/jobs").json() if x["id"] == job["id"])
+        if j["stage"] in {"done", "error"}:
+            break
+        time.sleep(0.5)
+    assert j["stage"] == "done", j
+    proj = client.get(f"/api/projects/{j['project']}").json()
+    assert proj["source"]["title"] == "Ma vidéo" and len(proj["clips"]) == 1
+    assert proj["clips"][0]["reason"]

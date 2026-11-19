@@ -114,6 +114,9 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
                 setattr(job, k, v)
 
     # ---------- création ----------
+    uploads: dict[str, tuple[Path, str]] = {}
+    uploads_dir = out_root / "_sources" / "uploads"
+
     def run_create(job: Job, body: JobIn) -> None:
         from ..pipeline import make_clips, publish
 
@@ -126,8 +129,11 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
             jump_cuts=body.jump_cuts, progress_bar=body.progress_bar,
         )
         try:
+            local = uploads.get(body.url[len("upload:"):]) if body.url.startswith("upload:") else None
             out = make_clips(body.url, s, out_root,
-                             lambda st, fr, msg: update(job, stage=st, progress=fr, message=msg))
+                             lambda st, fr, msg: update(job, stage=st, progress=fr, message=msg),
+                             local_file=local[0] if local else None,
+                             local_title=local[1] if local else "")
             update(job, project=out.name)
             if body.auto_publish:
                 update(job, stage="publish", message="Publication automatique")
@@ -139,12 +145,66 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     @app.post("/api/jobs")
     def create_job(body: JobIn):
-        if not body.url.startswith(("http://", "https://")):
+        label = body.url
+        if body.url.startswith("upload:"):
+            up = uploads.get(body.url[len("upload:"):])
+            if not up:
+                raise HTTPException(400, "fichier envoyé introuvable, renvoie-le")
+            label = f"📁 {up[1]}"
+        elif not body.url.startswith(("http://", "https://")):
             raise HTTPException(400, "lien invalide")
-        job = Job(id=uuid.uuid4().hex[:10], url=body.url)
+        job = Job(id=uuid.uuid4().hex[:10], url=label)
         jobs[job.id] = job
         heavy.submit(run_create, job, body)
         return job.__dict__
+
+    @app.post("/api/uploads")
+    async def upload_video(request: Request):
+        """Reçoit un fichier vidéo brut (corps de la requête), en streaming sur le disque."""
+        import urllib.parse
+
+        name = urllib.parse.unquote(request.headers.get("x-filename", "video.mp4"))[:120]
+        ext = Path(name).suffix.lower()
+        if ext not in {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp"}:
+            raise HTTPException(400, "format non pris en charge (mp4, mov, mkv, webm…)")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        up_id = "upload-" + uuid.uuid4().hex[:8]
+        dest = uploads_dir / f"{up_id}{ext}"
+        size = 0
+        with dest.open("wb") as f:
+            async for chunk in request.stream():
+                f.write(chunk)
+                size += len(chunk)
+        if size < 1000:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(400, "fichier vide")
+        uploads[up_id] = (dest, Path(name).stem)
+        return {"id": up_id, "name": name, "size": size}
+
+    @app.get("/api/cookies")
+    def cookies_status():
+        from ..download import cookies_path
+        p = cookies_path()
+        return {"present": bool(p), "updated_at": p.stat().st_mtime if p else None}
+
+    @app.post("/api/cookies")
+    async def save_cookies(request: Request):
+        from ..config import HOME_DIR, ensure_dirs
+        text = (await request.body()).decode("utf-8", "replace")
+        lines = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+        if not any("youtube.com" in ln and ln.count("\t") >= 6 for ln in lines):
+            raise HTTPException(400, "ce n'est pas un cookies.txt YouTube (format Netscape attendu)")
+        ensure_dirs()
+        dest = HOME_DIR / "youtube-cookies.txt"
+        dest.write_text(text if text.startswith("# Netscape") else "# Netscape HTTP Cookie File\n" + text)
+        dest.chmod(0o600)
+        return {"present": True, "updated_at": dest.stat().st_mtime}
+
+    @app.delete("/api/cookies")
+    def delete_cookies():
+        from ..config import HOME_DIR
+        (HOME_DIR / "youtube-cookies.txt").unlink(missing_ok=True)
+        return {"present": False}
 
     @app.get("/api/jobs")
     def list_jobs():
