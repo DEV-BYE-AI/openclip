@@ -230,14 +230,44 @@ def analyze(segments: list[Segment], *, num_clips: int, min_s: float, max_s: flo
         candidates.append(_score_window(window, window[0].seg.start, window[-1].seg.end, idf,
                                         video_end, lang))
 
-    picked: list[dict] = []
-    for c in sorted(candidates, key=lambda c: -c["score"]):
-        if any(not (c["end"] <= p["start"] or c["start"] >= p["end"]) for p in picked):
+    picked = select_best(candidates, num_clips)
+    return [Highlight(**c) for c in sorted(picked, key=lambda c: -c["score"])]
+
+
+def select_best(candidates: list[dict], k: int) -> list[dict]:
+    """Choisit jusqu'à k passages qui ne se chevauchent pas, avec le meilleur score total.
+
+    Contrairement à « prendre le meilleur, puis le suivant qui rentre », cette méthode
+    (programmation dynamique sur les intervalles) laisse de la place pour les autres clips :
+    on obtient bien le nombre demandé dès que la vidéo est assez longue.
+    """
+    import bisect
+
+    if not candidates or k <= 0:
+        return []
+    cands = sorted(candidates, key=lambda c: c["end"])
+    ends = [c["end"] for c in cands]
+    n = len(cands)
+    # prev[i] = nombre de candidats qui finissent avant le début du candidat i
+    prev = [bisect.bisect_right(ends, c["start"]) for c in cands]
+    neg = float("-inf")
+    # best[j][i] : meilleur total avec exactement j clips parmi les i premiers candidats
+    best = [[0.0] * (n + 1)] + [[neg] * (n + 1) for _ in range(k)]
+    for j in range(1, k + 1):
+        row, below = best[j], best[j - 1]
+        for i in range(1, n + 1):
+            take = below[prev[i - 1]]
+            take = take + cands[i - 1]["score"] + 1.0 if take != neg else neg  # +1 : chaque clip compte
+            row[i] = row[i - 1] if row[i - 1] >= take else take
+    j = max((j for j in range(k, 0, -1) if best[j][n] != neg), default=0)
+    picked, i = [], n
+    while j > 0 and i > 0:
+        if best[j][i] == best[j][i - 1]:
+            i -= 1
             continue
-        picked.append(c)
-        if len(picked) >= num_clips:
-            break
-    return [Highlight(**c) for c in picked]
+        picked.append(cands[i - 1])
+        i, j = prev[i - 1], j - 1
+    return picked
 
 
 def _score_window(window: list[_SegFeat], start: float, end: float, idf: dict, video_end: float,

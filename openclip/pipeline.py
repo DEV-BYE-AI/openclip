@@ -134,7 +134,10 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
         manifest["clips"].append(clip)
         _save(out_dir, manifest)
 
-    progress("done", 1.0, f"{len(ordered)} clips prêts")
+    msg = f"{len(ordered)} clips prêts"
+    if len(ordered) < cs.num_clips:
+        msg += f" (vidéo trop courte pour {cs.num_clips} clips de {cs.min_seconds:.0f} s minimum)"
+    progress("done", 1.0, msg)
     return out_dir
 
 

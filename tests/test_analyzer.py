@@ -68,3 +68,22 @@ def test_find_highlights_without_key_uses_local(monkeypatch):
     segs = build([BLAND] * 10 + PUNCHY * 2 + [BLAND] * 10)
     clips = find_highlights(segs, title="t", num_clips=2, min_s=30, max_s=60)
     assert clips and clips[0].reason
+
+
+def test_select_best_fits_requested_count():
+    from openclip.analyzer import select_best
+    # glouton : prendrait [20-70] (score 100) et bloquerait les deux autres
+    cands = [{"start": 20, "end": 70, "score": 100}, {"start": 0, "end": 40, "score": 90},
+             {"start": 45, "end": 90, "score": 90}]
+    picked = select_best(cands, 2)
+    assert sorted((c["start"], c["end"]) for c in picked) == [(0, 40), (45, 90)]
+    assert [c["score"] for c in select_best(cands, 1)] == [100]
+    assert select_best([], 3) == []
+
+
+def test_requested_count_on_long_enough_video():
+    import random
+    random.seed(3)
+    segs = build([random.choice([BLAND] + PUNCHY) for _ in range(160)])  # ~12 min
+    clips = find_highlights(segs, title="t", num_clips=12, min_s=30, max_s=60)
+    assert len(clips) == 12

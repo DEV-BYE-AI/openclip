@@ -195,9 +195,21 @@ def snap(h: Highlight, segments: list[Segment], min_s: float, max_s: float) -> H
     return replace(h, start=max(0.0, start - 0.1), end=end)
 
 
-def remove_overlaps(clips: list[Highlight]) -> list[Highlight]:
+def remove_overlaps(clips: list[Highlight], tolerance: float = 1.5) -> list[Highlight]:
+    """Écarte les clips qui se chevauchent vraiment.
+
+    Les petites marges ajoutées par `snap` (pour ne pas couper un mot) font se toucher deux
+    clips voisins sur une fraction de seconde : dans ce cas on raccourcit au lieu de jeter.
+    """
     kept: list[Highlight] = []
     for c in clips:
-        if all(c.end <= k.start or c.start >= k.end for k in kept):
+        clash = [k for k in kept if c.start < k.end and k.start < c.end]
+        if all(min(c.end, k.end) - max(c.start, k.start) <= tolerance for k in clash):
+            for k in clash:  # chevauchement minime : on coupe au milieu
+                mid = (max(c.start, k.start) + min(c.end, k.end)) / 2
+                if c.start < k.start:
+                    c.end, k.start = mid, mid
+                else:
+                    k.end, c.start = mid, mid
             kept.append(c)
     return kept
