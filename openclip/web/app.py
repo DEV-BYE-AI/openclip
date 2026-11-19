@@ -87,8 +87,12 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
-        """Protège toute l'interface par identifiant / mot de passe si OPENCLIP_PASSWORD est défini."""
-        if password:
+        """Protège toute l'interface par identifiant / mot de passe si OPENCLIP_PASSWORD est défini.
+
+        Seules les pages publiques exigées par TikTok / Google (mentions légales, page de retour
+        après autorisation) restent accessibles sans mot de passe.
+        """
+        if password and not request.url.path.startswith(("/legal/", "/callback/")):
             import base64
             ok = False
             header = request.headers.get("authorization", "")
@@ -531,6 +535,46 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     if Path("/usr/share/novnc/core/rfb.js").exists():
         app.mount("/novnc", StaticFiles(directory="/usr/share/novnc"), name="novnc")
+
+    # ---------- pages publiques (exigées par TikTok / Google pour valider une application) ----------
+    brand = os.environ.get("OPENCLIP_BRAND", "OpenClip")
+    contact = os.environ.get("OPENCLIP_CONTACT", "")
+
+    def public_page(title: str, body: str) -> HTMLResponse:
+        return HTMLResponse(f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · {brand}</title>
+<style>body{{font:16px/1.6 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;
+color:#1d1d1f;background:#fff}}h1{{font-size:28px}}h2{{font-size:19px;margin-top:28px}}
+@media (prefers-color-scheme:dark){{body{{background:#0d0e12;color:#f3f1ec}}}}</style></head>
+<body><h1>{title}</h1>{body}<p style="margin-top:40px;opacity:.6">{brand}</p></body></html>""")
+
+    @app.get("/legal/terms", response_class=HTMLResponse)
+    def legal_terms():
+        return public_page("Conditions d'utilisation", f"""
+<p>{brand} est un outil privé de montage vidéo : il crée de courts extraits verticaux à partir de vidéos
+et peut, à la demande de son utilisateur, les publier sur les comptes TikTok et YouTube que celui-ci
+a lui-même connectés.</p>
+<h2>Utilisation</h2><p>L'utilisateur s'engage à ne publier que des contenus dont il détient les droits
+ou pour lesquels il a obtenu l'autorisation, et à respecter les conditions de TikTok et de YouTube.</p>
+<h2>Responsabilité</h2><p>Le service est fourni tel quel. L'utilisateur reste seul responsable des contenus
+qu'il publie.</p>{f"<h2>Contact</h2><p>{contact}</p>" if contact else ""}""")
+
+    @app.get("/legal/privacy", response_class=HTMLResponse)
+    def legal_privacy():
+        return public_page("Politique de confidentialité", f"""
+<p>{brand} est utilisé uniquement par son propriétaire, sur son propre serveur.</p>
+<h2>Données traitées</h2><p>Lors de la connexion d'un compte TikTok ou YouTube, {brand} reçoit un jeton
+d'accès et le nom public du compte. Ces jetons sont stockés sur le serveur dans des fichiers lisibles uniquement par le service, ne sont
+jamais partagés, et servent uniquement à publier les vidéos choisies par l'utilisateur.</p>
+<h2>Suppression</h2><p>Le bouton « Déconnecter » supprime immédiatement le jeton. L'accès peut aussi être
+révoqué à tout moment depuis les paramètres TikTok ou Google du compte.</p>
+<h2>Partage</h2><p>Aucune donnée n'est vendue ni transmise à des tiers.</p>
+{f"<h2>Contact</h2><p>{contact}</p>" if contact else ""}""")
+
+    @app.get("/callback/{platform}", response_class=HTMLResponse)
+    def oauth_landing(platform: str):
+        return public_page("Autorisation reçue",
+                           "<p>Tu peux revenir dans OpenClip : la connexion se termine automatiquement.</p>")
 
     app.mount("/media", StaticFiles(directory=out_root), name="media")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

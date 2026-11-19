@@ -99,3 +99,14 @@ def test_cookies_and_upload(tmp_path: Path, monkeypatch):
     proj = client.get(f"/api/projects/{j['project']}").json()
     assert proj["source"]["title"] == "Ma vidéo" and len(proj["clips"]) == 1
     assert proj["clips"][0]["reason"]
+
+
+def test_public_legal_pages_without_password(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENCLIP_PASSWORD", "s3cret")
+    monkeypatch.setenv("OPENCLIP_BRAND", "Studio Test")
+    client = TestClient(create_app(tmp_path))
+    for path in ("/legal/terms", "/legal/privacy", "/callback/tiktok?code=x&state=y"):
+        r = client.get(path)
+        assert r.status_code == 200 and "Studio Test" in r.text
+    assert client.get("/api/projects").status_code == 401  # le reste reste protégé
+    assert client.get("/legal/../api/projects").status_code == 401

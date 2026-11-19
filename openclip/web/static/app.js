@@ -449,14 +449,15 @@ async function renderAccounts() {
             <li>Sur <b>developers.tiktok.com</b>, connecte-toi puis <b>Manage apps → Connect an app</b>.</li>
             <li>Ajoute les produits <b>Login Kit</b> et <b>Content Posting API</b> (active « Direct Post »).</li>
             <li>Scopes : <code>user.info.basic</code>, <code>video.upload</code>, <code>video.publish</code>.</li>
-            <li>Dans Login Kit, déclare une <b>Redirect URI</b> en https, par exemple <code>https://llabphone.com/tiktok</code> (la page n'a pas besoin d'exister).</li>
+            <li>Dans Login Kit, déclare la <b>Redirect URI</b> <code>${esc(location.protocol === "https:" ? location.origin : "https://ton-domaine.fr")}/callback/tiktok</code>${location.protocol === "https:" ? "" : " (remplace par le domaine d'OpenClip)"}.</li>
+            <li>Site, conditions et confidentialité demandés par TikTok : <code>…/legal/terms</code> et <code>…/legal/privacy</code> sur ce même domaine.</li>
             <li>Onglet <b>Sandbox</b> : ajoute ton compte TikTok comme « Target user » pour tester tout de suite.</li>
             <li>Copie ici le <b>Client key</b> et le <b>Client secret</b>.</li>
           </ol>
           <form class="ed" id="tt-form" style="padding:0">
             <label>Client key<input name="client_key" value="${esc(a.tiktok_client_key || "")}" autocomplete="off"></label>
             <label>Client secret<input name="client_secret" type="password" placeholder="${a.tiktok_configured ? "•••••• (inchangé)" : ""}" autocomplete="off"></label>
-            <label>Redirect URI (identique à celle de l'app TikTok)<input name="redirect_uri" value="${esc(a.tiktok_redirect_uri || "")}" placeholder="https://llabphone.com/tiktok"></label>
+            <label>Redirect URI (identique à celle de l'app TikTok)<input name="redirect_uri" value="${esc(a.tiktok_redirect_uri || "")}" placeholder="https://ton-domaine.fr/callback/tiktok"></label>
             <label>Mode de publication
               <select name="mode">
                 <option value="draft" ${a.tiktok_mode !== "direct" ? "selected" : ""}>Brouillon : tu valides dans l'app TikTok (recommandé)</option>
