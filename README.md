@@ -153,7 +153,10 @@ C'est prêt : l'analyse locale fonctionne sans clé. (Optionnel : `ANTHROPIC_API
   session pour ses téléchargements. « Actualiser » renouvelle les cookies sans se reconnecter.
   Autres options : envoyer un `cookies.txt` exporté depuis un ordinateur, ou envoyer directement le
   fichier vidéo avec « Envoyer un fichier vidéo ».
-- Petit serveur (1-2 Go de RAM) : mets `WHISPER_MODEL=base` dans `.env`, la transcription sera plus rapide.
+- **Vitesse** : pour les liens YouTube, OpenClip récupère d'abord les sous-titres automatiques de
+  YouTube (quelques secondes) et ne transcrit lui-même que si la vidéo n'en a pas. Pour accélérer la
+  transcription locale (fichiers envoyés, vidéos sans sous-titres) : `WHISPER_MODEL=base` ou `tiny`
+  dans `.env` (plus rapide, un peu moins précis).
 
 ## Automatisation
 

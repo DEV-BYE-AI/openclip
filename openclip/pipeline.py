@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import ClipSettings, Settings
-from .download import local_source, safe_download
+from .download import download_captions, local_source, parse_json3, safe_download
 from .highlights import find_highlights
 from .render import keep_intervals, remap_words, render_clip, thumbnail
 from .subtitles import build_ass
@@ -45,8 +45,22 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     out_dir = out_root / src.video_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    progress("transcribe", 0.15, f"Préparation de la transcription de « {src.title} »")
     transcript = work / f"{src.video_id}.transcript.json"
+    if not transcript.exists() and not local_file and settings.youtube_captions:
+        # le plus rapide : les sous-titres automatiques de YouTube (quelques secondes)
+        progress("transcribe", 0.12, "Récupération des sous-titres YouTube")
+        captions = download_captions(url, work, src.video_id)
+        if captions:
+            try:
+                segs = parse_json3(captions)
+            except (ValueError, KeyError):
+                segs = []
+            if len(segs) >= 5:
+                transcript.write_text(json.dumps([asdict(x) for x in segs], ensure_ascii=False))
+                progress("transcribe", 0.45, f"Sous-titres YouTube récupérés ({len(segs)} phrases)")
+
+    if not transcript.exists():
+        progress("transcribe", 0.15, f"Préparation de la transcription de « {src.title} »")
     started = time.time()
 
     def on_transcribe(done: float, total: float) -> None:

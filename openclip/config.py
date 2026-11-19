@@ -33,6 +33,8 @@ class Settings:
     anthropic_model: str = os.environ.get("OPENCLIP_MODEL", "claude-opus-5-5")
     whisper_model: str = os.environ.get("WHISPER_MODEL", "small")
     whisper_device: str = os.environ.get("WHISPER_DEVICE", "cpu")
+    # utiliser les sous-titres automatiques de YouTube quand ils existent (bien plus rapide)
+    youtube_captions: bool = os.environ.get("YOUTUBE_CAPTIONS", "1") != "0"
     tiktok_client_key: str = os.environ.get("TIKTOK_CLIENT_KEY", "")
     tiktok_client_secret: str = os.environ.get("TIKTOK_CLIENT_SECRET", "")
     tiktok_redirect_uri: str = os.environ.get(

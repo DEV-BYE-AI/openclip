@@ -105,3 +105,84 @@ def local_source(path: Path, title: str) -> SourceVideo:
     except (KeyError, ValueError, json.JSONDecodeError):
         raise RuntimeError("fichier vidéo illisible") from None
     return SourceVideo(video_id=path.stem, title=title, path=path, duration=duration, url="", uploader="")
+
+
+# --------------------------------------------------------------------------- sous-titres YouTube
+
+def download_captions(url: str, out_dir: Path, video_id: str) -> Path | None:
+    """Télécharge les sous-titres automatiques d'origine (piste « -orig ») au format json3.
+
+    Ils contiennent l'horodatage de chaque mot : on évite ainsi la transcription locale,
+    qui est lente sur un petit serveur. Renvoie None si la vidéo n'en a pas.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    opts = {
+        "skip_download": True,
+        "writeautomaticsub": True,
+        "writesubtitles": False,
+        "subtitleslangs": [".*-orig"],
+        "subtitlesformat": "json3",
+        "outtmpl": str(out_dir / f"{video_id}.captions.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
+    cookies = cookies_path()
+    if cookies:
+        opts["cookiefile"] = str(cookies)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except Exception:
+        return None
+    found = sorted(out_dir.glob(f"{video_id}.captions.*json3"))
+    return found[0] if found else None
+
+
+def parse_json3(path: Path):
+    """Convertit des sous-titres json3 YouTube en segments (phrases) avec mots horodatés."""
+    import json as _json
+
+    from .transcribe import Segment, Word
+
+    data = _json.loads(path.read_text(encoding="utf-8"))
+    words: list[Word] = []
+    for ev in data.get("events", []):
+        segs = ev.get("segs") or []
+        if ev.get("aAppend") or not segs:
+            continue
+        start = ev.get("tStartMs", 0) / 1000
+        end = start + ev.get("dDurationMs", 0) / 1000
+        pieces = [(s.get("tOffsetMs"), s.get("utf8", "")) for s in segs]
+        pieces = [(o, t.replace("\n", " ").strip()) for o, t in pieces if t.strip()]
+        if not pieces:
+            continue
+        if len(pieces) == 1 or all(o is None for o, _ in pieces[1:]):
+            # pas d'horodatage par mot : on répartit les mots sur la durée de la ligne
+            toks = " ".join(t for _, t in pieces).split()
+            step = (end - start) / max(len(toks), 1)
+            for i, tok in enumerate(toks):
+                words.append(Word(start + i * step, start + (i + 1) * step, tok))
+            continue
+        times = [start + (o or 0) / 1000 for o, _ in pieces]
+        for i, (_, text) in enumerate(pieces):
+            w_end = times[i + 1] if i + 1 < len(pieces) else max(end, times[i] + 0.2)
+            for tok in text.split():
+                words.append(Word(times[i], w_end, tok))
+    words.sort(key=lambda w: w.start)
+    # fins de mots cohérentes (pas de chevauchement avec le mot suivant)
+    for a, b in zip(words, words[1:]):
+        if a.end > b.start:
+            a.end = b.start
+
+    # regroupement en phrases : ponctuation, pause, ou longueur maximale
+    segments: list[Segment] = []
+    cur: list[Word] = []
+    for i, w in enumerate(words):
+        cur.append(w)
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        pause = (nxt.start - w.end) if nxt else 99
+        if w.text.endswith((".", "?", "!", "…")) or pause > 0.7 or len(cur) >= 16:
+            segments.append(Segment(cur[0].start, cur[-1].end, " ".join(x.text for x in cur), cur))
+            cur = []
+    return segments
