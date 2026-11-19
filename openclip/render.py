@@ -228,7 +228,10 @@ def render_clip(src: Path, start: float, end: float, out: Path, *, mode: str = "
     import os
     preset = os.environ.get("RENDER_PRESET", "veryfast")
     cmd += [
-        "-c:v", "libx264", "-preset", preset, "-crf", os.environ.get("RENDER_CRF", "21"),
+        # débit plafonné : ~5 Mb/s suffit largement pour un écran de téléphone (TikTok recompresse
+        # de toute façon) et garde un clip de 60 s sous ~40 Mo, partageable depuis le téléphone
+        "-c:v", "libx264", "-preset", preset, "-crf", os.environ.get("RENDER_CRF", "22"),
+        "-maxrate", os.environ.get("RENDER_MAXRATE", "5M"), "-bufsize", "10M",
         "-pix_fmt", "yuv420p", "-r", "30", "-movflags", "+faststart",
         "-progress", "pipe:1", "-nostats", str(out),
     ]

@@ -391,8 +391,8 @@ async function onClipAction(e, m) {
     // 2e toucher = ouverture du menu de partage du téléphone (TikTok, YouTube, Instagram…)
     const key = `${m.id}/${n}/${clip.version || 1}`;
     const caption = captionOf(clip);
-    try { await navigator.clipboard.writeText(caption); } catch {}
     if (!shareCache.has(key)) {
+      try { await navigator.clipboard.writeText(caption); } catch {}
       btn.disabled = true; btn.textContent = "Préparation…";
       try {
         const res = await fetch(`/media/${encodeURIComponent(m.id)}/${encodeURIComponent(clip.file)}?v=${clip.version || 1}`);
@@ -415,7 +415,7 @@ async function onClipAction(e, m) {
       // rechargement de la page le libère. Dans tous les cas, on télécharge le clip à la place.
       const why = {
         InvalidStateError: "un partage précédent n'est pas terminé : recharge la page",
-        NotAllowedError: "le téléphone a refusé (touche une seule fois, sans attendre)",
+        NotAllowedError: "le téléphone a refusé, souvent car le fichier est trop lourd",
         DataError: "fichier trop lourd pour le partage",
       }[err.name] || err.name || "erreur inconnue";
       toast(`Partage impossible (${why}). Téléchargement du clip à la place…`, true);
