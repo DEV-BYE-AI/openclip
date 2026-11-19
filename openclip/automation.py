@@ -501,6 +501,8 @@ class Scheduler:
 
     def publish_next(self, cfg: dict | None = None) -> dict | None:
         cfg = cfg or load_settings()
+        if not cfg["targets"]:  # partage manuel uniquement : les clips restent « à partager »
+            return None
         item = next_pending()
         if not item:
             return None

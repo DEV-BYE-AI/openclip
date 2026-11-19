@@ -48,6 +48,7 @@ async function route() {
   clearInterval(pollTimer);
   if (hash.startsWith("#/p/")) return renderProject(decodeURIComponent(hash.slice(4)));
   if (hash === "#/projets") { $('[data-nav="projets"]').classList.add("active"); return renderProjects(); }
+  if (hash === "#/partager") { $('[data-nav="projets"]').classList.add("active"); return renderToShare(); }
   if (hash === "#/comptes") { $('[data-nav="comptes"]').classList.add("active"); return renderAccounts(); }
   if (hash === "#/auto") { $('[data-nav="auto"]').classList.add("active"); return renderAuto(); }
   if (hash === "#/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(); }
@@ -250,8 +251,32 @@ function projectCard(p) {
   </a>`;
 }
 
+async function renderToShare() {
+  view.innerHTML = `<h1 style="font-size:34px">À partager</h1>
+    <p class="muted">Les nouveaux clips créés automatiquement, pas encore partagés sur TikTok. Touche « 📲 Partager » (2 fois), choisis TikTok, colle la légende. Le clip disparaît de la liste ensuite.</p>
+    <div id="share-list" style="display:grid;gap:28px;margin-top:20px"><div class="muted">Chargement…</div></div>`;
+  const items = await api("/api/to-share");
+  const box = $("#share-list");
+  if (!items.length) { box.innerHTML = `<div class="empty">Rien à partager pour l'instant 👌 Les clips des nouvelles vidéos arriveront ici tout seuls.</div>`; return; }
+  const byProject = {};
+  items.forEach((it) => (byProject[it.project] = byProject[it.project] || []).push(it.clip));
+  box.innerHTML = "";
+  for (const [pid, nums] of Object.entries(byProject)) {
+    let m;
+    try { m = await api(`/api/projects/${encodeURIComponent(pid)}`); } catch { continue; }
+    const sec = document.createElement("section");
+    sec.innerHTML = `<h3 style="font-size:16px;margin-bottom:10px"><a href="#/p/${encodeURIComponent(pid)}" style="text-decoration:none">${esc(m.source.title || pid)}</a></h3>
+      <div class="clips">${nums.map((n) => clipCard(pid, { ...m.clips[n - 1], n }, 99)).join("")}</div>`;
+    sec.querySelector(".clips").onclick = (e) => onClipAction(e, m);
+    box.appendChild(sec);
+  }
+}
+
 async function renderProjects() {
-  view.innerHTML = `<h1 style="font-size:34px">Projets</h1><div id="all" class="projects" style="margin-top:24px"></div>`;
+  view.innerHTML = `<h1 style="font-size:34px">Projets</h1>
+    <a class="btn btn-primary" href="#/partager" style="margin-top:14px;padding:12px 18px" id="to-share-btn">📲 Clips à partager</a>
+    <div id="all" class="projects" style="margin-top:24px"></div>`;
+  api("/api/to-share").then((l) => { const b = $("#to-share-btn"); if (b) b.textContent = `📲 Clips à partager (${l.length})`; }).catch(() => {});
   const list = await api("/api/projects");
   $("#all").innerHTML = list.length ? list.map(projectCard).join("") : `<div class="empty" style="grid-column:1/-1">Aucun projet pour l'instant. <a href="#/">Crée le premier →</a></div>`;
 }
@@ -355,6 +380,7 @@ function clipCard(pid, c, rank) {
       <button class="btn btn-sm btn-ghost" data-act="edit">Modifier</button>
       <a class="btn btn-sm btn-ghost" href="/api/projects/${encodeURIComponent(pid)}/clips/${c.n}/download">Télécharger</a>
       ${canShareFiles() ? `<button class="btn btn-sm btn-primary full" data-act="share">📲 Partager vers TikTok / YouTube…</button>` : ""}
+      <button class="btn btn-sm btn-ghost ${c.shared_tiktok ? "done" : ""}" data-act="mark">${c.shared_tiktok ? "✓ Partagé sur TikTok" : "Marquer partagé"}</button>
       <button class="btn btn-sm btn-ghost" data-act="copy">Copier la légende</button>
       <button class="btn btn-sm btn-ghost" data-act="delete" style="color:var(--danger)">Supprimer</button>
     </div>
@@ -380,6 +406,11 @@ async function onClipAction(e, m) {
   const clip = m.clips[n - 1];
   const act = btn.dataset.act;
   if (act === "edit") return openEditor(m, n);
+  if (act === "mark") {
+    await api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}/shared`, { method: "POST", body: { shared: !clip.shared_tiktok } });
+    toast(clip.shared_tiktok ? "Marqué comme non partagé" : "Marqué comme partagé ✓");
+    return location.hash === "#/partager" ? renderToShare() : renderProject(m.id);
+  }
   if (act === "delete") {
     if (!confirm(`Supprimer le clip « ${clip.title} » ?`)) return;
     try { await api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}`, { method: "DELETE" }); toast("Clip supprimé"); renderProject(m.id); }
@@ -409,6 +440,7 @@ async function onClipAction(e, m) {
     try {
       await navigator.share({ files: [file], title: clip.title, text: caption });
       toast("Dans TikTok, colle la légende (déjà copiée) 👍");
+      api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}/shared`, { method: "POST", body: { shared: true } }).catch(() => {});
     } catch (err) {
       if (err.name === "AbortError") return;  // l'utilisateur a fermé le menu
       // Android garde parfois le partage précédent « ouvert » (InvalidStateError) : seul un
@@ -572,6 +604,7 @@ async function renderAuto() {
     </div>
     ${missing.length ? `<div class="tip" style="color:var(--amber);margin-top:12px">⚠️ Non connecté : ${missing.map((t) => t === "tiktok" ? "TikTok" : "YouTube").join(", ")}. Les publications vers ${missing.length > 1 ? "ces comptes" : "ce compte"} échoueront. <a href="#/comptes">Connecter</a></div>` : ""}
 
+    <a class="btn btn-primary" href="#/partager" style="margin-top:14px;padding:12px 18px">📲 Voir les clips à partager</a>
     <div class="section-title"><h2>Chaînes suivies</h2><button class="btn btn-sm btn-ghost" id="auto-check">Vérifier maintenant</button></div>
     <form class="url-row" id="auto-add"><input id="auto-url" placeholder="https://www.youtube.com/@nomdelachaine" autocomplete="off"><button class="btn btn-primary" style="padding:12px 18px">Suivre</button></form>
     <div class="jobs" style="margin-top:10px">${a.channels.length ? a.channels.map((c) => `

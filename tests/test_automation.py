@@ -147,3 +147,12 @@ def test_tiktok_token_per_account(home):
     assert tiktok.token_file("main").name == "tiktok.json"
     assert tiktok.token_file("inspecteurnews").name == "tiktok-inspecteurnews.json"
     assert not tiktok.is_connected("inspecteurnews")
+
+
+def test_no_targets_keeps_queue(home):
+    out = home / "out"
+    auto.save_settings({"enabled": True, "targets": [], "slots": ["12:00"]})
+    auto.enqueue_project(project(out, "p", [90]), 0)
+    calls = []
+    auto.Scheduler(lambda *a: None, lambda *a: calls.append(a), out).tick(datetime(2026, 1, 1, 12, 5))
+    assert calls == [] and auto.load_queue()[0]["status"] == "pending"

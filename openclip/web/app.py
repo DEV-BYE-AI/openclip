@@ -288,6 +288,35 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
             })
         return sorted(items, key=lambda p: -p["created_at"])
 
+    @app.get("/api/to-share")
+    def to_share(limit: int = 60):
+        """Clips pas encore partagés sur TikTok (ni publiés, ni marqués), du plus récent au plus ancien."""
+        items = []
+        for f in out_root.glob("*/clips.json"):
+            try:
+                m = json.loads(f.read_text())
+            except json.JSONDecodeError:
+                continue
+            for i, c in enumerate(m.get("clips", []), 1):
+                done = c.get("shared_tiktok") or any(k.startswith("tiktok") for k in c.get("uploads", {}))
+                if not done:
+                    items.append({"project": f.parent.name, "clip": i, "score": c.get("score", 0),
+                                  "created_at": c.get("created_at") or m.get("created_at") or f.stat().st_mtime})
+        items.sort(key=lambda x: (-x["created_at"], -x["score"]))
+        return items[:limit]
+
+    @app.post("/api/projects/{pid}/clips/{n}/shared")
+    async def mark_shared(pid: str, n: int, request: Request):
+        from ..pipeline import _save, load_manifest
+        d = project_dir(pid)
+        m = load_manifest(d)
+        if not 1 <= n <= len(m["clips"]):
+            raise HTTPException(404, "clip introuvable")
+        value = (await request.json()).get("shared", True)
+        m["clips"][n - 1]["shared_tiktok"] = time.time() if value else None
+        _save(d, m)
+        return {"ok": True}
+
     @app.get("/api/projects/{pid}")
     def get_project(pid: str):
         d = project_dir(pid)

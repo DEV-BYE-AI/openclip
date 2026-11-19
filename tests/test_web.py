@@ -224,3 +224,14 @@ def test_verification_file_is_public(tmp_path: Path, monkeypatch):
     assert bad.status_code == 400
     assert client.get("/api/projects").status_code == 401
     assert client.get("/", headers=auth).status_code == 200  # la page d'accueil n'est pas capturée
+
+
+def test_to_share_list(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    make_project(tmp_path)
+    client = TestClient(create_app(tmp_path))
+    assert [x["clip"] for x in client.get("/api/to-share").json()] == [1]
+    client.post("/api/projects/abc123/clips/1/shared", json={"shared": True})
+    assert client.get("/api/to-share").json() == []
+    client.post("/api/projects/abc123/clips/1/shared", json={"shared": False})
+    assert len(client.get("/api/to-share").json()) == 1
