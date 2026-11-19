@@ -32,6 +32,37 @@ def _mmss(seconds: float) -> str:
     return f"{h}:{rem // 60:02d}:{rem % 60:02d}" if h else f"{rem // 60}:{rem % 60:02d}"
 
 
+def _captions_language_ok(captions: Path, src, settings: Settings, progress: Progress) -> bool:
+    """Vérifie que la langue des sous-titres YouTube est bien celle parlée dans la vidéo.
+
+    Si le créateur a mal réglé la langue de sa vidéo, YouTube transcrit par exemple du
+    français avec son modèle anglais : on obtient des phrases anglaises sans aucun sens.
+    """
+    import re as _re
+
+    m = _re.search(r"\.captions\.([a-zA-Z-]+?)(?:-orig)?\.json3$", captions.name)
+    cap_lang = (m.group(1) if m else "").split("-")[0].lower()
+    wanted = (settings.clip.language or "").lower()
+    if wanted:
+        ok = cap_lang == wanted
+    else:
+        progress("transcribe", 0.13, "Vérification de la langue parlée")
+        try:
+            from .transcribe import detect_spoken_language
+            spoken, prob = detect_spoken_language(src.path, src.duration, settings.whisper_model,
+                                                  settings.whisper_device)
+        except Exception as exc:  # pas de modèle disponible : on fait confiance à YouTube
+            log.warning("détection de langue impossible (%s)", exc)
+            return True
+        ok = cap_lang == spoken or prob < 0.6
+        if not ok:
+            log.info("sous-titres YouTube en %s mais vidéo en %s (%.0f %%) : transcription locale",
+                     cap_lang, spoken, prob * 100)
+    if not ok:
+        progress("transcribe", 0.14, "Sous-titres YouTube dans la mauvaise langue : transcription par OpenClip")
+    return ok
+
+
 def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress = _noop,
                local_file: Path | None = None, local_title: str = "") -> Path:
     cs = settings.clip
@@ -50,6 +81,8 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
         # le plus rapide : les sous-titres automatiques de YouTube (quelques secondes)
         progress("transcribe", 0.12, "Récupération des sous-titres YouTube")
         captions = download_captions(url, work, src.video_id)
+        if captions and not _captions_language_ok(captions, src, settings, progress):
+            captions = None
         if captions:
             try:
                 segs = parse_json3(captions)
@@ -89,9 +122,15 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     }
     ordered = sorted(highlights, key=lambda x: -x.score)
     for i, h in enumerate(ordered, 1):
-        progress("render", 0.5 + 0.48 * (i - 1) / len(ordered), f"Montage du clip {i}/{len(ordered)}")
+        base = 0.5 + 0.48 * (i - 1) / len(ordered)
+        progress("render", base, f"Montage du clip {i}/{len(ordered)}")
+
+        def on_clip(frac: float, i=i, base=base) -> None:
+            progress("render", base + 0.48 * frac / len(ordered),
+                     f"Montage du clip {i}/{len(ordered)} · {round(frac * 100)} %")
+
         clip = {"file": f"clip_{i:02d}.mp4", **asdict(h), "style": cs.caption_style, "uploads": {}}
-        _render(clip, out_dir, src.path, segments, cs)
+        _render(clip, out_dir, src.path, segments, cs, on_progress=on_clip)
         manifest["clips"].append(clip)
         _save(out_dir, manifest)
 
@@ -99,7 +138,7 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     return out_dir
 
 
-def _render(clip: dict, out_dir: Path, src: Path, segments, cs: ClipSettings) -> None:
+def _render(clip: dict, out_dir: Path, src: Path, segments, cs: ClipSettings, on_progress=None) -> None:
     start, end = clip["start"], clip["end"]
     words = words_between(segments, start, end)
     intervals = keep_intervals(words, start, end) if cs.jump_cuts else [(start, end)]
@@ -113,7 +152,8 @@ def _render(clip: dict, out_dir: Path, src: Path, segments, cs: ClipSettings) ->
                         style=clip.get("style", cs.caption_style), keywords=clip.get("keywords"))
     mp4 = out_dir / clip["file"]
     render_clip(src, start, end, mp4, mode=cs.crop_mode, ass=ass, out_w=cs.width,
-                out_h=cs.height, intervals=intervals, progress_bar=cs.progress_bar)
+                out_h=cs.height, intervals=intervals, progress_bar=cs.progress_bar,
+                on_progress=on_progress)
     thumbnail(mp4, out_dir / f"{stem}.jpg", at=min(1.0, duration / 2))
     clip["duration"] = round(duration, 2)
     clip["version"] = clip.get("version", 0) + 1

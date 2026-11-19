@@ -52,6 +52,56 @@ def face_center_x(path: Path, start: float, end: float, samples: int = 12) -> fl
     return statistics.median(xs) if xs else None
 
 
+def content_center_x(path: Path, start: float, end: float, crop_frac: float,
+                     samples: int = 16) -> float | None:
+    """Sans visage (jeu vidéo, paysage…) : où se trouve l'action dans l'image ?
+
+    On mesure, colonne par colonne, le mouvement entre images et les détails (contours),
+    en ignorant les bandes du haut et du bas (souvent des éléments d'interface), puis on
+    choisit la fenêtre verticale 9:16 qui en contient le plus, avec une légère préférence
+    pour le centre. Renvoie la position horizontale (0-1) du centre de cette fenêtre.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    cap = cv2.VideoCapture(str(path))
+    prev, energy = None, None
+    try:
+        for i in range(samples):
+            t = start + (end - start) * (i + 0.5) / samples
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            h, w = frame.shape[:2]
+            small = cv2.resize(frame, (320, max(1, int(320 * h / w))))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            band = gray[int(gray.shape[0] * 0.12): int(gray.shape[0] * 0.88)]
+            edges = np.abs(cv2.Sobel(band, cv2.CV_32F, 1, 0)) + np.abs(cv2.Sobel(band, cv2.CV_32F, 0, 1))
+            col = edges.mean(axis=0)
+            if prev is not None and prev.shape == band.shape:
+                col = col + 3 * np.abs(band - prev).mean(axis=0)  # le mouvement compte plus
+            prev = band
+            energy = col if energy is None else energy + col
+    finally:
+        cap.release()
+    if energy is None:
+        return None
+    n = len(energy)
+    win = max(1, int(n * crop_frac))
+    if win >= n:
+        return 0.5
+    sums = np.convolve(energy, np.ones(win), mode="valid")  # énergie de chaque fenêtre possible
+    centers = (np.arange(len(sums)) + win / 2) / n
+    prior = 1 - 0.35 * np.abs(centers - 0.5) / 0.5  # léger avantage au centre
+    score = sums / (sums.max() or 1) * prior
+    best = float(centers[int(score.argmax())])
+    # si l'action est presque uniforme, on reste au centre (plus naturel)
+    return best if score.max() - score[len(score) // 2] > 0.08 else 0.5
+
+
 def has_audio(path: Path) -> bool:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
@@ -118,7 +168,9 @@ def build_graph(src_w: int, src_h: int, mode: str, center_x: float | None, out_w
     if mode == "blur":
         chains.append(
             f"[vc]split=2[bg][fg];"
-            f"[bg]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},boxblur=25:5[bg2];"
+            # le flou est calculé en petite taille puis agrandi : ~5x plus rapide, rendu identique
+            f"[bg]scale={out_w // 4}:{out_h // 4}:force_original_aspect_ratio=increase,"
+            f"crop={out_w // 4}:{out_h // 4},boxblur=8:3,scale={out_w}:{out_h},eq=brightness=-0.08[bg2];"
             f"[fg]scale={out_w}:-2[fg2];"
             f"[bg2][fg2]overlay=(W-w)/2:(H-h)/2,setsar=1[vf]"
         )
@@ -146,7 +198,7 @@ def build_graph(src_w: int, src_h: int, mode: str, center_x: float | None, out_w
 def render_clip(src: Path, start: float, end: float, out: Path, *, mode: str = "face",
                 ass: Path | None = None, out_w: int = 1080, out_h: int = 1920,
                 intervals: list[tuple[float, float]] | None = None,
-                progress_bar: bool = True, loudnorm: bool = True) -> Path:
+                progress_bar: bool = True, loudnorm: bool = True, on_progress=None) -> Path:
     """Rend le clip. `intervals` (absolus, issus de keep_intervals) active les jump cuts."""
     src_w, src_h = probe(src)
     audio = has_audio(src)
@@ -154,8 +206,11 @@ def render_clip(src: Path, start: float, end: float, out: Path, *, mode: str = "
     if mode == "face":
         try:
             center = face_center_x(src, start, end)
+            if center is None:  # pas de visage : on suit l'action
+                crop_frac = min(1.0, src_h * out_w / out_h / src_w)
+                center = content_center_x(src, start, end, crop_frac)
         except Exception as exc:  # la détection ne doit jamais empêcher le montage
-            log.warning("détection de visage impossible (%s) — recadrage centré", exc)
+            log.warning("analyse du cadrage impossible (%s) — recadrage centré", exc)
     rel = [(a - start, b - start) for a, b in intervals] if intervals else None
     duration = sum(b - a for a, b in rel) if rel else end - start
     graph = build_graph(src_w, src_h, mode, center, out_w, out_h, ass, intervals=rel,
@@ -168,12 +223,27 @@ def render_clip(src: Path, start: float, end: float, out: Path, *, mode: str = "
     ]
     if audio:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"]
+    # « veryfast » : ~3x plus rapide que « medium » pour une qualité visuellement proche
+    # (fichier un peu plus lourd). Réglable avec RENDER_PRESET (ultrafast … slow).
+    import os
+    preset = os.environ.get("RENDER_PRESET", "veryfast")
     cmd += [
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-r", "30", "-movflags", "+faststart", str(out),
+        "-c:v", "libx264", "-preset", preset, "-crf", os.environ.get("RENDER_CRF", "21"),
+        "-pix_fmt", "yuv420p", "-r", "30", "-movflags", "+faststart",
+        "-progress", "pipe:1", "-nostats", str(out),
     ]
     out.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(cmd, check=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    for line in proc.stdout:  # ffmpeg écrit « out_time_us=… » au fil de l'encodage
+        if on_progress and line.startswith("out_time_us=") and duration > 0:
+            try:
+                done = int(line.split("=", 1)[1]) / 1_000_000
+            except ValueError:
+                continue
+            on_progress(max(0.0, min(1.0, done / duration)))
+    err = proc.stderr.read()
+    if proc.wait() != 0:
+        raise RuntimeError(f"échec du montage ffmpeg : {err.strip()[-400:]}")
     return out
 
 

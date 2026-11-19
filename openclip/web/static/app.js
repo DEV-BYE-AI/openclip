@@ -105,7 +105,7 @@ function renderHome() {
         </div>
         <div>
           <div class="opt-label">Cadrage</div>
-          ${chips("crop_mode", [["face", "Suit le visage"], ["center", "Centré"], ["blur", "Fond flou"]], p.crop_mode)}
+          ${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], p.crop_mode)}
         </div>
         <div class="opt-wide">
           <div class="opt-label">Style des sous-titres</div>

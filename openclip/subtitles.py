@@ -55,12 +55,12 @@ HEADER = """[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
 PlayResY: {h}
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{font},{size},{primary},&H00FFFFFF,{outline},{back},-1,0,0,0,100,100,0,0,{bs},{ow},{sh},2,60,60,{margin},1
+Style: Cap,{font},{size},{primary},&H00FFFFFF,{outline},{back},-1,0,0,0,100,100,0,0,{bs},{ow},{sh},2,70,70,{margin},1
 Style: Hook,Montserrat ExtraBold,{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,90,90,230,1
 
 [Events]
@@ -143,10 +143,15 @@ def build_ass(
                     parts.append("{" + st.keyword + "}" + fmt(x) + "{\\r}")
                 else:
                     parts.append(fmt(x))
-            prefix = "{" + st.extra + "}" if st.extra else ""
+            # ligne trop longue pour l'écran (≈ 0,6 × taille de police par caractère) : on réduit
+            chars = sum(len(x.text) for x in visible) + len(visible) - 1
+            size = int(height * st.size)
+            room = width - 2 * 70
+            fit = "" if chars * 0.62 * size <= room else f"\\fs{max(int(room / (chars * 0.62)), int(size * 0.6))}"
+            prefix = "{" + st.extra + fit + "}" if (st.extra or fit) else ""
             text = prefix + " ".join(parts)
-            if st.extra:  # \r remet le style à zéro : on réapplique les effets globaux
-                text = text.replace("{\\r}", "{\\r" + st.extra + "}")
+            if st.extra or fit:  # \r remet le style à zéro : on réapplique les effets globaux
+                text = text.replace("{\\r}", "{\\r" + st.extra + fit + "}")
             lines.append(f"Dialogue: 0,{ts(start)},{ts(min(end, duration))},Cap,,0,0,0,,{text}")
 
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")

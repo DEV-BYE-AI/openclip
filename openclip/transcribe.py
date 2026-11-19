@@ -35,11 +35,7 @@ def transcribe(
 
     import os
 
-    from faster_whisper import WhisperModel
-
-    compute = "float16" if device == "cuda" else "int8"
-    threads = int(os.environ.get("WHISPER_THREADS", "0")) or (os.cpu_count() or 2)
-    model = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=threads)
+    model = _model(model_name, device)
     audio = load_audio(media)
     total = len(audio) / 16000
     # Réglages rapides pour un CPU : décodage glouton (beam_size=1, ~2-3x plus rapide que 5)
@@ -64,7 +60,32 @@ def transcribe(
     return segments
 
 
-def load_audio(media: Path, sr: int = 16000):
+_MODELS: dict = {}
+
+
+def _model(model_name: str, device: str):
+    import os
+
+    from faster_whisper import WhisperModel
+
+    key = (model_name, device)
+    if key not in _MODELS:
+        compute = "float16" if device == "cuda" else "int8"
+        threads = int(os.environ.get("WHISPER_THREADS", "0")) or (os.cpu_count() or 2)
+        _MODELS[key] = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=threads)
+    return _MODELS[key]
+
+
+def detect_spoken_language(media: Path, duration: float, model_name: str = "base",
+                           device: str = "cpu") -> tuple[str, float]:
+    """Langue réellement parlée, détectée par Whisper sur 30 s prises vers le premier tiers."""
+    start = max(0.0, min(duration * 0.3, duration - 30)) if duration else 0.0
+    audio = load_audio(media, start=start, length=30)
+    lang, prob, _ = _model(model_name, device).detect_language(audio)
+    return lang, prob
+
+
+def load_audio(media: Path, sr: int = 16000, start: float | None = None, length: float | None = None):
     """Décode l'audio avec ffmpeg en mono 16 kHz (format attendu par Whisper).
 
     On n'utilise pas le décodeur de faster-whisper (PyAV) : ses versions récentes ont
@@ -74,8 +95,9 @@ def load_audio(media: Path, sr: int = 16000):
 
     import numpy as np
 
+    cut = (["-ss", f"{start:.2f}"] if start else []) + (["-t", f"{length:.2f}"] if length else [])
     raw = subprocess.run(
-        ["ffmpeg", "-v", "error", "-nostdin", "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr),
+        ["ffmpeg", "-v", "error", "-nostdin", *cut, "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr),
          "-f", "f32le", "-"], capture_output=True, check=True,
     ).stdout
     audio = np.frombuffer(raw, dtype=np.float32)

@@ -40,7 +40,7 @@ apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg python3-venv python3-pip git curl >/dev/null
 
 say "Installation du navigateur pour la connexion YouTube (écran virtuel + Chrome)"
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb x11vnc novnc fonts-noto-color-emoji >/dev/null \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb x11vnc novnc fonts-noto-color-emoji fonts-montserrat >/dev/null \
   || echo "Paquets écran virtuel non installés : la connexion YouTube depuis l'interface sera indisponible."
 if ! command -v google-chrome-stable >/dev/null; then
   if curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; then

@@ -23,7 +23,9 @@ def download(url: str, out_dir: Path) -> SourceVideo:
     out_dir.mkdir(parents=True, exist_ok=True)
     opts = {
         # 1080p max, mp4 de préférence (plus rapide à ré-encoder)
-        "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
+        # H.264 (avc1) en priorité : bien plus rapide à décoder que l'AV1 ou le VP9 sur un petit serveur
+        "format": ("bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]"
+                   "/bv*[height<=1080]+ba/b[height<=1080]/b"),
         "merge_output_format": "mp4",
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
         "noplaylist": True,
@@ -169,9 +171,13 @@ def parse_json3(path: Path):
             w_end = times[i + 1] if i + 1 < len(pieces) else max(end, times[i] + 0.2)
             for tok in text.split():
                 words.append(Word(times[i], w_end, tok))
-    words.sort(key=lambda w: w.start)
-    # fins de mots cohérentes (pas de chevauchement avec le mot suivant)
+    # On garde l'ordre des lignes : certaines pistes (traductions, sous-titres manuels)
+    # ont des lignes qui se chevauchent, et trier tous les mots par heure les mélangerait.
     for a, b in zip(words, words[1:]):
+        if b.start < a.start:
+            b.start = a.start
+        if b.end < b.start:
+            b.end = b.start + 0.05
         if a.end > b.start:
             a.end = b.start
 

@@ -24,3 +24,29 @@ def test_parse_json3_word_timings(tmp_path: Path):
     # la pause de 3 s avant la dernière ligne coupe une phrase
     assert segs[-1].text == "phrase sans horodatage par mot"
     assert abs(segs[-1].words[-1].end - 10.0) < 0.01
+
+
+def test_overlapping_lines_keep_order(tmp_path: Path):
+    # sous-titres traduits / manuels : lignes qui se chevauchent, sans horodatage par mot
+    data = {"events": [
+        {"tStartMs": 0, "dDurationMs": 4000, "segs": [{"utf8": "un deux trois quatre"}]},
+        {"tStartMs": 2000, "dDurationMs": 4000, "segs": [{"utf8": "cinq six sept huit"}]},
+    ]}
+    p = tmp_path / "o.json3"
+    p.write_text(json.dumps(data))
+    words = [w.text for s in parse_json3(p) for w in s.words]
+    assert words == ["un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit"]
+
+
+def test_wrong_language_captions_are_rejected(tmp_path: Path, monkeypatch):
+    import openclip.pipeline as pipeline
+    import openclip.transcribe as tr
+    from openclip.config import Settings
+    from openclip.download import SourceVideo
+
+    src = SourceVideo("vid", "Ma vidéo", tmp_path / "v.mp4", 600, "u")
+    cap = tmp_path / "vid.captions.en-orig.json3"
+    monkeypatch.setattr(tr, "detect_spoken_language", lambda *a, **k: ("fr", 0.97))
+    assert pipeline._captions_language_ok(cap, src, Settings(), lambda *a: None) is False
+    monkeypatch.setattr(tr, "detect_spoken_language", lambda *a, **k: ("en", 0.97))
+    assert pipeline._captions_language_ok(cap, src, Settings(), lambda *a: None) is True
