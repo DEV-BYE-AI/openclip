@@ -405,11 +405,27 @@ async function onClipAction(e, m) {
       btn.disabled = false;
       return;
     }
+    const file = shareCache.get(key);
     try {
-      await navigator.share({ files: [shareCache.get(key)], title: clip.title, text: caption });
+      await navigator.share({ files: [file], title: clip.title, text: caption });
       toast("Dans TikTok, colle la légende (déjà copiée) 👍");
     } catch (err) {
-      if (err.name !== "AbortError") toast("Partage impossible : utilise « Télécharger »", true);
+      if (err.name === "AbortError") return;  // l'utilisateur a fermé le menu
+      // Android garde parfois le partage précédent « ouvert » (InvalidStateError) : seul un
+      // rechargement de la page le libère. Dans tous les cas, on télécharge le clip à la place.
+      const why = {
+        InvalidStateError: "un partage précédent n'est pas terminé : recharge la page",
+        NotAllowedError: "le téléphone a refusé (touche une seule fois, sans attendre)",
+        DataError: "fichier trop lourd pour le partage",
+      }[err.name] || err.name || "erreur inconnue";
+      toast(`Partage impossible (${why}). Téléchargement du clip à la place…`, true);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(file);
+      a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      shareCache.delete(key);
+      btn.textContent = "📲 Partager vers TikTok / YouTube…";
     }
     return;
   }
