@@ -42,7 +42,7 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     progress("analyze", 0.45, f"Recherche des {cs.num_clips} meilleurs moments")
     highlights = find_highlights(segments, title=src.title, num_clips=cs.num_clips,
                                  min_s=cs.min_seconds, max_s=cs.max_seconds,
-                                 model=settings.anthropic_model)
+                                 model=settings.anthropic_model, media=src.path)
     if not highlights:
         raise RuntimeError("aucun passage exploitable (vidéo sans parole ?)")
 

@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from openclip.highlights import Highlight, heuristic, remove_overlaps, snap
+from openclip.highlights import Highlight, remove_overlaps, snap
 from openclip.render import build_graph, keep_intervals, remap_words, render_clip
 from openclip.subtitles import build_ass, chunk_words, ts
 from openclip.transcribe import Segment, Word
@@ -22,12 +22,6 @@ def test_snap_respects_duration_bounds():
     for start, end in [(3, 20), (10, 130), (50.5, 95)]:
         h = snap(Highlight(start, end, "t"), segs, 30, 60)
         assert 30 <= h.duration <= 60.5, h
-
-
-def test_heuristic_returns_non_overlapping_clips():
-    clips = heuristic(fake_segments(80), 3, 30, 60)
-    assert len(clips) == 3
-    assert remove_overlaps(clips) == clips
 
 
 def test_chunk_words_and_ass(tmp_path: Path):

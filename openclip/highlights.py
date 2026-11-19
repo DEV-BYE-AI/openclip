@@ -95,6 +95,13 @@ def format_transcript(segments: list[Segment]) -> str:
     return "\n".join(f"[{s.start:.1f}-{s.end:.1f}] {s.text}" for s in segments)
 
 
+def has_claude_key() -> bool:
+    """Vrai seulement si une vraie clé est configurée (pas la valeur d'exemple)."""
+    import os
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    return len(key) > 20 and not key.endswith("...")
+
+
 def find_highlights(
     segments: list[Segment],
     *,
@@ -103,14 +110,27 @@ def find_highlights(
     min_s: float,
     max_s: float,
     model: str = "claude-opus-5-5",
+    media=None,
 ) -> list[Highlight]:
+    """Choisit les meilleurs passages.
+
+    Par défaut : analyse locale gratuite (voir analyzer.py). Si une clé Claude est
+    configurée, Claude choisit les passages et rédige les textes ; en cas d'échec on
+    revient à l'analyse locale.
+    """
+    from .analyzer import analyze
+
     if not segments:
         return []
-    try:
-        raw = _ask_claude(segments, title, num_clips, min_s, max_s, model)
-    except Exception as exc:  # pas de clé, réseau, refus...
-        log.warning("Claude indisponible (%s) — repli sur l'heuristique.", exc)
-        raw = heuristic(segments, num_clips, min_s, max_s)
+    raw: list[Highlight] = []
+    if has_claude_key():
+        try:
+            raw = _ask_claude(segments, title, num_clips, min_s, max_s, model)
+        except Exception as exc:  # réseau, refus, quota...
+            log.warning("Claude indisponible (%s) — analyse locale.", exc)
+    if not raw:
+        raw = analyze(segments, num_clips=num_clips, min_s=min_s, max_s=max_s,
+                      media=media, title=title)
     clips = [snap(h, segments, min_s, max_s) for h in raw]
     return remove_overlaps(sorted(clips, key=lambda h: -h.score))[:num_clips]
 
@@ -159,29 +179,6 @@ def _ask_claude(segments, title, num_clips, min_s, max_s, model) -> list[Highlig
         )
         for c in data["clips"]
     ]
-
-
-def heuristic(segments: list[Segment], num_clips: int, min_s: float, max_s: float) -> list[Highlight]:
-    """Repli sans IA : fenêtres glissantes notées sur la densité de parole."""
-    target = (min_s + max_s) / 2
-    candidates: list[Highlight] = []
-    for i, seg in enumerate(segments):
-        start = seg.start
-        words, end = 0, start
-        for s in segments[i:]:
-            if s.end - start > max_s:
-                break
-            words += len(s.text.split())
-            end = s.end
-        dur = end - start
-        if dur < min_s:
-            continue
-        density = words / dur
-        punch = sum(segments[i].text.count(c) for c in "?!")
-        score = density * 10 + punch * 5 - abs(dur - target) * 0.2
-        candidates.append(Highlight(start, end, seg.text[:60] or "Clip", hook=seg.text[:80],
-                                    score=max(0.0, min(100.0, score)), reason="Choix automatique (sans IA)"))
-    return remove_overlaps(sorted(candidates, key=lambda h: -h.score))[:num_clips]
 
 
 def snap(h: Highlight, segments: list[Segment], min_s: float, max_s: float) -> Highlight:

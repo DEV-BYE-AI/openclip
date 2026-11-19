@@ -155,5 +155,5 @@ else
   echo "Mot de passe : celui de OPENCLIP_PASSWORD dans $ENV_FILE"
 fi
 echo
-echo "Reste à remplir dans $ENV_FILE : ANTHROPIC_API_KEY (et TikTok / YouTube), puis : sudo systemctl restart openclip"
+echo "Optionnel dans $ENV_FILE : ANTHROPIC_API_KEY (Claude), TikTok / YouTube, puis : sudo systemctl restart openclip"
 echo "Si ton hébergeur a un pare-feu dans son panneau (OVH, Hetzner, Oracle…), ouvre aussi le port $PORT là-bas."

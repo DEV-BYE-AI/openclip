@@ -66,7 +66,7 @@ const PRESET_INFO = {
   rewards: ["62–95 s", "TikTok Rewards"],
   long: ["90–170 s", "Histoire"],
 };
-const STAGES = [["download", "Téléchargement"], ["transcribe", "Transcription"], ["analyze", "Analyse IA"], ["render", "Montage"]];
+const STAGES = [["download", "Téléchargement"], ["transcribe", "Transcription"], ["analyze", "Analyse"], ["render", "Montage"]];
 
 function chips(name, options, current) {
   return `<div class="chips" data-group="${name}">${options.map(([v, label, small]) =>
@@ -79,7 +79,7 @@ function renderHome() {
   view.innerHTML = `
     <section class="hero">
       <h1>Une vidéo longue.<br><em>Des clips qui retiennent.</em></h1>
-      <p>Colle un lien YouTube : l'IA repère les passages les plus forts, les monte en vertical avec sous-titres animés, et te dit pourquoi ils vont marcher.</p>
+      <p>Colle un lien YouTube : OpenClip repère les passages les plus forts, les monte en vertical avec sous-titres animés, et te dit pourquoi ils vont marcher.</p>
     </section>
     <form class="launcher" id="launch">
       <div class="url-row">
@@ -114,7 +114,7 @@ function renderHome() {
             <label class="switch"><input type="checkbox" name="pub_tiktok" ${p.auto_publish.includes("tiktok") ? "checked" : ""} ${META.accounts.tiktok ? "" : "disabled"}> Publier sur TikTok</label>
             <label class="switch"><input type="checkbox" name="pub_youtube" ${p.auto_publish.includes("youtube") ? "checked" : ""} ${META.accounts.youtube ? "" : "disabled"}> Publier sur YouTube</label>
           </div>
-          ${META.accounts.claude ? "" : `<div class="tip">⚠️ Pas de clé Claude : la sélection se fera sans IA, avec un score moins fiable. <a href="#/comptes">Configurer</a></div>`}
+          <div class="tip">${META.accounts.claude ? "Analyse : <b>Claude</b> (clé trouvée)." : "Analyse <b>locale et gratuite</b> : accroche, rythme, énergie de la voix, émotions et chiffres."}</div>
         </div>
       </div>
     </form>
@@ -396,9 +396,9 @@ async function renderAccounts() {
     <h1 style="font-size:34px">Comptes</h1>
     <p class="muted">Les clés et jetons restent sur ta machine (fichier <code>.env</code> et <code>~/.openclip/tokens</code>).</p>
     <div class="accounts" style="margin-top:20px">
-      <div class="account"><h3>Claude ${st(a.claude, "Clé trouvée")}</h3>
-        <div class="muted">Choisit les meilleurs moments, écrit les accroches et note chaque clip.</div>
-        ${a.claude ? "" : `<div class="note">Ajoute <code>ANTHROPIC_API_KEY</code> dans <code>.env</code> puis relance <code>openclip web</code>.</div>`}
+      <div class="account"><h3>Claude <span class="status ${a.claude ? "ok" : ""}">${a.claude ? "Clé trouvée" : "Optionnel"}</span></h3>
+        <div class="muted">${a.claude ? "Claude choisit les moments et rédige les accroches." : "Sans clé, OpenClip utilise son analyse locale gratuite (accroche, rythme, énergie de la voix, émotions, chiffres)."}</div>
+        ${a.claude ? "" : `<div class="note">Pour des textes encore plus naturels, tu peux ajouter une clé <code>ANTHROPIC_API_KEY</code> dans <code>.env</code> (payant à l'usage).</div>`}
       </div>
       <div class="account"><h3>TikTok ${st(a.tiktok)}</h3>
         <div class="muted">Publication directe ou en brouillon via l'API officielle.</div>

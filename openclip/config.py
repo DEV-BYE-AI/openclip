@@ -4,9 +4,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
-load_dotenv()
+# .env du dossier courant d'abord, sinon celui à la racine du projet
+load_dotenv(find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent / ".env")
 
 HOME_DIR = Path(os.environ.get("OPENCLIP_HOME", Path.home() / ".openclip"))
 TOKENS_DIR = HOME_DIR / "tokens"

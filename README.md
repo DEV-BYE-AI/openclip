@@ -24,8 +24,11 @@ lien YouTube ─► yt-dlp ─► faster-whisper ─► Claude (meilleurs moment
 
 - Téléchargement de la vidéo (yt-dlp, jusqu'en 1080p)
 - Transcription locale au mot près (faster-whisper, langue détectée automatiquement)
-- Choix des passages les plus viraux par Claude : accroche, titre, description, hashtags, score.
-  Sans clé API, un algorithme de repli prend le relais.
+- **Analyse locale gratuite** (aucune clé requise) : chaque passage est noté sur l'accroche (question,
+  chiffre, phrase choc, adresse directe), la rétention (rythme, blancs, énergie de la voix, fin complète)
+  et le partage (émotion, chiffres, rires, sujet précis). Elle écrit aussi l'accroche, le titre, la
+  description, les hashtags, les mots à colorer et « pourquoi ça peut marcher ».
+- Option : avec une clé Claude, c'est Claude qui choisit les passages et rédige les textes.
 - Coupe propre sur les fins de phrases, durée forcée entre `--min` et `--max`
 - Recadrage 9:16 : `face` (suit le visage), `center`, ou `blur` (vidéo entière sur fond flou)
 - Sous-titres animés en 5 styles (`pop`, `boxed`, `neon`, `karaoke`, `minimal`) : mot prononcé surligné,
@@ -88,9 +91,10 @@ titres dans `clips.json` avant de lancer `openclip upload`.
 
 ## Connecter les comptes
 
-### Claude (choix des moments)
-Crée une clé sur <https://console.anthropic.com> et mets-la dans `ANTHROPIC_API_KEY`.
-Le modèle utilisé est `claude-opus-5-5` (modifiable via `OPENCLIP_MODEL`).
+### Claude (optionnel)
+Pas obligatoire : sans clé, l'analyse locale gratuite est utilisée. Pour laisser Claude choisir les
+passages et rédiger les textes, crée une clé sur <https://console.anthropic.com> (payant à l'usage) et
+mets-la dans `ANTHROPIC_API_KEY`. Modèle : `claude-opus-5-5` (modifiable via `OPENCLIP_MODEL`).
 
 ### TikTok
 1. Crée une app sur <https://developers.tiktok.com>, ajoute les produits **Login Kit** et
@@ -136,7 +140,7 @@ mot de passe pour l'interface et l'affiche à la fin. Il vérifie que le port es
 sous-domaine il ajoute un bloc dans Caddy (https automatique) ou un site nginx séparé, et remet
 l'ancienne configuration si la nouvelle est invalide.
 
-Ensuite : remplis `ANTHROPIC_API_KEY` dans `.env` puis `sudo systemctl restart openclip`.
+C'est prêt : l'analyse locale fonctionne sans clé. (Optionnel : `ANTHROPIC_API_KEY` dans `.env` puis `sudo systemctl restart openclip`.)
 
 - Logs : `sudo journalctl -u openclip -f`
 - Mise à jour : `git pull && sudo bash deploy/install.sh` (avec les mêmes options)
