@@ -43,11 +43,13 @@ function savePrefs(p) { try { localStorage.setItem(PREF_KEY, JSON.stringify(p));
 /* ------------------------------------------------------------------ routeur */
 async function route() {
   const hash = location.hash || "#/";
+  if (hash !== "#/youtube" && window.__rfb) { try { window.__rfb.disconnect(); } catch {} window.__rfb = null; }
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.remove("active"));
   clearInterval(pollTimer);
   if (hash.startsWith("#/p/")) return renderProject(decodeURIComponent(hash.slice(4)));
   if (hash === "#/projets") { $('[data-nav="projets"]').classList.add("active"); return renderProjects(); }
   if (hash === "#/comptes") { $('[data-nav="comptes"]').classList.add("active"); return renderAccounts(); }
+  if (hash === "#/youtube") { $('[data-nav="comptes"]').classList.add("active"); return renderYoutubeLogin(); }
   $('[data-nav="home"]').classList.add("active");
   return renderHome();
 }
@@ -454,10 +456,15 @@ async function renderAccounts() {
       <div class="muted">YouTube bloque souvent les serveurs (« confirm you're not a bot »). Avec les cookies d'un navigateur connecté à YouTube, le téléchargement repasse.</div>
       ${cookies.present ? `<div class="note">Mis à jour le ${new Date(cookies.updated_at * 1000).toLocaleString("fr-FR")}. Ils expirent au bout de quelques semaines : renvoie-en si l'erreur revient.</div>` : ""}
       <div class="chips">
-        <label class="btn btn-sm">${cookies.present ? "Remplacer" : "Envoyer"} cookies.txt<input type="file" id="cookies" accept=".txt,text/plain" hidden></label>
+        <a class="btn btn-sm btn-yt" href="#/youtube">▶ Se connecter à YouTube</a>
+        ${cookies.present ? `<button class="btn btn-sm btn-ghost" id="cookies-refresh">Actualiser</button>` : ""}
+      </div>
+      <div class="note">Ouvre un vrai navigateur sur le serveur, affiché ici : connecte-toi à ton compte YouTube, OpenClip garde la session. Idéalement avec un compte Google secondaire.</div>
+      <div class="chips">
+        <label class="btn btn-sm btn-ghost">${cookies.present ? "Remplacer" : "Envoyer"} un cookies.txt<input type="file" id="cookies" accept=".txt,text/plain" hidden></label>
         ${cookies.present ? `<button class="btn btn-sm btn-ghost" id="cookies-del">Supprimer</button>` : ""}
       </div>
-      <div class="note">Comment l'obtenir : sur un ordinateur, connecte-toi à YouTube (idéalement avec un compte secondaire), installe l'extension « Get cookies.txt LOCALLY » (Chrome ou Firefox), ouvre youtube.com, clique sur l'extension puis « Export ». Envoie ici le fichier obtenu. Ne le partage avec personne : il donne accès au compte.</div>
+      <div class="note">Autre méthode (ordinateur) : , connecte-toi à YouTube (idéalement avec un compte secondaire), installe l'extension « Get cookies.txt LOCALLY » (Chrome ou Firefox), ouvre youtube.com, clique sur l'extension puis « Export ». Envoie ici le fichier obtenu. Ne le partage avec personne : il donne accès au compte.</div>
     </div>
     <section class="money">
       <h2>Transformer les vues en revenus</h2>
@@ -480,11 +487,102 @@ document.addEventListener("change", async (e) => {
   } catch (err) { toast(err.message, true); }
 });
 document.addEventListener("click", async (e) => {
+  if (e.target.id !== "cookies-refresh") return;
+  e.target.disabled = true; e.target.textContent = "Actualisation… (20 s)";
+  try { await api("/api/browser/refresh", { method: "POST" }); toast("Cookies actualisés ✓"); }
+  catch (err) { toast(err.message, true); }
+  renderAccounts();
+});
+document.addEventListener("click", async (e) => {
   if (e.target.id !== "cookies-del") return;
   await api("/api/cookies", { method: "DELETE" });
   toast("Cookies supprimés");
   renderAccounts();
 });
+
+/* ------------------------------------------------------------------ connexion YouTube */
+const KEYS = { Enter: 0xff0d, Backspace: 0xff08, Tab: 0xff09, Escape: 0xff1b, Ctrl: 0xffe3 };
+const keysym = (ch) => { const cp = ch.codePointAt(0); return cp <= 0xff ? cp : 0x01000000 | cp; };
+
+async function loadRFB() {
+  try { return (await import("/novnc/core/rfb.js")).default; }
+  catch { return (await import("https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js")).default; }
+}
+
+async function renderYoutubeLogin() {
+  const st = await api("/api/browser");
+  view.innerHTML = `
+    <a href="#/comptes" class="muted" style="text-decoration:none">← Comptes</a>
+    <h1 style="font-size:28px;margin-top:10px">Connexion YouTube</h1>
+    <p class="muted">Un vrai navigateur tourne sur ton serveur et s'affiche ci-dessous. Connecte-toi à ton compte Google / YouTube comme d'habitude, puis touche « J'ai fini ».</p>
+    ${st.missing.length ? `<div class="empty">Il manque sur le serveur : ${esc(st.missing.join(", "))}.<br>Relance <code>sudo bash deploy/install.sh</code> pour les installer.</div>` : `
+    <div class="yt-actions">
+      <button class="btn btn-primary" id="b-start">${st.running ? "Reprendre" : "Ouvrir le navigateur"}</button>
+      <button class="btn btn-ghost" id="b-cancel" ${st.running ? "" : "hidden"}>Annuler</button>
+    </div>
+    <div id="screen-wrap" hidden>
+      <div id="screen"></div>
+      <div class="typebar">
+        <input id="typer" placeholder="Écris ici (e-mail, mot de passe…) puis ➤" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn btn-sm" id="k-send">➤</button>
+      </div>
+      <div class="chips">
+        <button class="btn btn-sm btn-ghost" data-k="Enter">⏎ Entrée</button>
+        <button class="btn btn-sm btn-ghost" data-k="Backspace">⌫ Effacer</button>
+        <button class="btn btn-sm btn-ghost" data-k="Tab">⇥ Tab</button>
+      </div>
+      <div class="note">Touche l'écran pour cliquer. Les caractères tapés dans la barre sont envoyés au champ sélectionné dans le navigateur.</div>
+      <button class="btn btn-primary" id="b-finish" style="width:100%;margin-top:12px">✓ J'ai fini, enregistrer la connexion</button>
+    </div>`}`;
+  if (st.missing.length) return;
+
+  const connect = async () => {
+    const res = await api("/api/browser/start", { method: "POST" });
+    const RFB = await loadRFB();
+    $("#screen-wrap").hidden = false;
+    $("#b-start").hidden = true;
+    $("#b-cancel").hidden = false;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const rfb = new RFB($("#screen"), `${proto}://${location.host}/vnc?token=${encodeURIComponent(res.token)}`);
+    rfb.scaleViewport = true;
+    rfb.resizeSession = false;
+    rfb.focusOnClick = false;
+    rfb.addEventListener("disconnect", () => { if (window.__rfb === rfb) toast("Navigateur déconnecté", true); });
+    window.__rfb = rfb;
+  };
+  $("#b-start").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Démarrage…";
+    try { await connect(); } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = "Ouvrir le navigateur"; }
+  };
+  $("#b-cancel").onclick = async () => {
+    window.__rfb?.disconnect(); window.__rfb = null;
+    await api("/api/browser/stop", { method: "POST" });
+    location.hash = "#/comptes";
+  };
+  const send = () => {
+    const rfb = window.__rfb, inp = $("#typer");
+    if (!rfb || !inp.value) return;
+    for (const ch of inp.value) rfb.sendKey(keysym(ch));
+    inp.value = "";
+  };
+  $("#k-send").onclick = send;
+  $("#typer").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); window.__rfb?.sendKey(KEYS.Enter); } });
+  document.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => window.__rfb?.sendKey(KEYS[b.dataset.k])));
+  $("#b-finish").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Enregistrement…";
+    window.__rfb?.disconnect(); window.__rfb = null;
+    try {
+      const r = await api("/api/browser/finish", { method: "POST" });
+      toast(`Connexion YouTube enregistrée ✓ (${r.cookies} cookies)`);
+      location.hash = "#/comptes";
+    } catch (err) {
+      toast(err.message, true);
+      e.target.disabled = false; e.target.textContent = "✓ J'ai fini, enregistrer la connexion";
+      renderYoutubeLogin();
+    }
+  };
+  if (st.running) $("#b-start").click();
+}
 
 /* ------------------------------------------------------------------ démarrage */
 (async () => {

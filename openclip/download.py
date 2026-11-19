@@ -32,6 +32,12 @@ def download(url: str, out_dir: Path) -> SourceVideo:
     }
     # Sur un serveur, YouTube demande souvent « confirme que tu n'es pas un robot » :
     # exporte les cookies de ton navigateur (format Netscape) et indique le fichier ici.
+    # YouTube exige maintenant un moteur JavaScript (deno) pour certaines vidéos
+    import shutil
+    import sys
+    deno = shutil.which("deno") or str(Path(sys.executable).with_name("deno"))
+    if Path(deno).exists():
+        opts["js_runtimes"] = {"deno": {"path": deno}}
     cookies = cookies_path()
     if cookies:
         opts["cookiefile"] = str(cookies)

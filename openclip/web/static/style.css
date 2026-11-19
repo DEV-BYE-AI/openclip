@@ -15,6 +15,7 @@
   --body: "Inter", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--body); }
 a { color: inherit; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -214,6 +215,13 @@ dialog::backdrop { background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
   padding: 12px 18px; border-radius: 14px; font-weight: 600; z-index: 50; max-width: calc(100vw - 32px);
 }
 .toast.bad { background: var(--danger); color: #fff; }
+
+.yt-actions { display: flex; gap: 8px; margin: 18px 0; }
+#screen { width: 100%; max-width: 480px; aspect-ratio: 9 / 16; max-height: 72vh; margin: 0 auto; background: #000; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); }
+#screen > div { background: #000 !important; }
+.typebar { display: flex; gap: 8px; margin: 12px auto 8px; max-width: 480px; }
+.typebar input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; outline: none; }
+#screen-wrap .chips, #screen-wrap .note, #b-finish { max-width: 480px; margin-left: auto; margin-right: auto; }
 
 @media (max-width: 640px) {
   .topbar { gap: 10px; }

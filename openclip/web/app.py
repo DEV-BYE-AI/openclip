@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -373,6 +373,91 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         flow.fetch_token(authorization_response=str(request.url))
         youtube.save_credentials(flow.credentials)
         return RedirectResponse("/#/comptes")
+
+    # ---------- connexion YouTube via navigateur distant ----------
+    @app.get("/api/browser")
+    def browser_status():
+        from ..browser_login import browser
+        return browser.status()
+
+    @app.post("/api/browser/start")
+    def browser_start():
+        from ..browser_login import browser
+        try:
+            return {"token": browser.start(), **browser.status()}
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/browser/finish")
+    def browser_finish():
+        from ..browser_login import browser
+        try:
+            return browser.finish()
+        except Exception as exc:
+            raise HTTPException(400, f"cookies non récupérés : {exc}")
+
+    @app.post("/api/browser/stop")
+    def browser_stop():
+        from ..browser_login import browser
+        browser.stop()
+        return browser.status()
+
+    @app.post("/api/browser/refresh")
+    def browser_refresh():
+        from ..browser_login import browser
+        try:
+            return browser.refresh()
+        except Exception as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.websocket("/vnc")
+    async def vnc_bridge(ws: WebSocket, token: str = ""):
+        """Passerelle WebSocket <-> VNC local. Protégée par le jeton donné à /api/browser/start."""
+        import asyncio
+
+        from ..browser_login import VNC_PORT, browser
+        if not browser.check_token(token):
+            await ws.close(code=1008)
+            return
+        wanted = ws.scope.get("subprotocols") or []
+        await ws.accept(subprotocol="binary" if "binary" in wanted else None)
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", VNC_PORT)
+        except OSError:
+            await ws.close(code=1011)
+            return
+
+        async def client_to_vnc():
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    return
+                data = msg.get("bytes") or (msg.get("text") or "").encode()
+                writer.write(data)
+                await writer.drain()
+
+        async def vnc_to_client():
+            while data := await reader.read(65536):
+                await ws.send_bytes(data)
+
+        async def quiet(coro):
+            try:
+                await coro
+            except Exception:  # déconnexion d'un côté ou de l'autre : on ferme tout
+                pass
+
+        tasks = [asyncio.create_task(quiet(client_to_vnc())), asyncio.create_task(quiet(vnc_to_client()))]
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in tasks:
+            t.cancel()
+        writer.close()
+        try:
+            await ws.close()
+        except Exception:  # client déjà parti
+            pass
+
+    if Path("/usr/share/novnc/core/rfb.js").exists():
+        app.mount("/novnc", StaticFiles(directory="/usr/share/novnc"), name="novnc")
 
     app.mount("/media", StaticFiles(directory=out_root), name="media")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

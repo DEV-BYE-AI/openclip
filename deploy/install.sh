@@ -37,7 +37,20 @@ fi
 
 say "Installation des paquets système (ffmpeg, python)"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg python3-venv python3-pip git >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg python3-venv python3-pip git curl >/dev/null
+
+say "Installation du navigateur pour la connexion YouTube (écran virtuel + Chrome)"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb x11vnc novnc fonts-noto-color-emoji >/dev/null \
+  || echo "Paquets écran virtuel non installés : la connexion YouTube depuis l'interface sera indisponible."
+if ! command -v google-chrome-stable >/dev/null; then
+  if curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/google-chrome.deb >/dev/null \
+      || echo "Chrome non installé : la connexion YouTube depuis l'interface sera indisponible."
+    rm -f /tmp/google-chrome.deb
+  else
+    echo "Téléchargement de Chrome impossible : la connexion YouTube depuis l'interface sera indisponible."
+  fi
+fi
 
 say "Installation d'OpenClip dans $APP_DIR/.venv"
 sudo -u "$RUN_USER" python3 -m venv "$APP_DIR/.venv"
@@ -68,6 +81,7 @@ Wants=network-online.target
 [Service]
 User=$RUN_USER
 WorkingDirectory=$APP_DIR
+Environment=PATH=$APP_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=$APP_DIR/.venv/bin/openclip web --host $HOST --port $PORT -o $APP_DIR/output
 Restart=on-failure
 RestartSec=5
