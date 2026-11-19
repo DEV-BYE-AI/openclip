@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+.venv/
+.env
+output/
+work/
+.openclip/
+client_secret*.json
+*.mp4
+*.webm
+*.m4a
