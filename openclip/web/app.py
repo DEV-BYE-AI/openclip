@@ -823,7 +823,7 @@ révoqué à tout moment depuis les paramètres TikTok ou Google du compte.</p>
 {f"<h2>Contact</h2><p>{contact}</p>" if contact else ""}""")
 
     @app.get("/callback/{platform}", response_class=HTMLResponse)
-    def oauth_landing(platform: str, code: str = "", state: str = "", error: str = "",
+    def oauth_landing(request: Request, platform: str, code: str = "", state: str = "", error: str = "",
                       error_description: str = ""):
         from html import escape
 
@@ -836,8 +836,16 @@ révoqué à tout moment depuis les paramètres TikTok ou Google du compte.</p>
                     <p><a href="/#/comptes">← Revenir dans OpenClip</a></p>""")
             return public_page("Connexion TikTok impossible",
                                f"<p>{escape(res['error'])}</p><p><a href='/#/comptes'>← Revenir dans OpenClip</a></p>")
-        return public_page("Autorisation reçue",
-                           "<p>Tu peux revenir dans OpenClip : la connexion se termine automatiquement.</p>")
+        from urllib.parse import parse_qsl
+        keys = [k for k, _ in parse_qsl(str(request.url.query))]
+        log.warning("retour %s sans code : paramètres %s", platform, keys)
+        detail = ", ".join(escape(k) for k in keys) or "aucun"
+        return public_page("Autorisation non reçue", f"""
+            <p>TikTok est revenu sur OpenClip <b>sans code d'autorisation</b> (paramètres reçus : {detail}).</p>
+            <p>Causes fréquentes : l'autorisation a été annulée, le compte TikTok n'est pas dans les
+            « Target users » de la Sandbox, ou l'app TikTok du téléphone a interrompu la connexion.
+            Réessaie depuis un navigateur d'ordinateur, ou en étant déconnecté de l'app TikTok.</p>
+            <p><a href="/#/auto">← Revenir dans OpenClip</a></p>""")
 
     # ---------- fichiers de vérification de propriété (URL prefix TikTok / Google) ----------
     @app.get("/api/verification-files")
