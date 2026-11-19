@@ -27,26 +27,38 @@ def transcribe(
     model_name: str = "small",
     device: str = "cpu",
     language: str | None = None,
+    progress=None,
 ) -> list[Segment]:
+    """Transcrit l'audio. `progress(fait_s, total_s)` est appelé au fil de l'eau."""
     if cache.exists():
         return load(cache)
+
+    import os
 
     from faster_whisper import WhisperModel
 
     compute = "float16" if device == "cuda" else "int8"
-    model = WhisperModel(model_name, device=device, compute_type=compute)
+    threads = int(os.environ.get("WHISPER_THREADS", "0")) or (os.cpu_count() or 2)
+    model = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=threads)
+    audio = load_audio(media)
+    total = len(audio) / 16000
+    # Réglages rapides pour un CPU : décodage glouton (beam_size=1, ~2-3x plus rapide que 5)
+    # et pas de contexte d'une phrase à l'autre (évite aussi les boucles de répétition).
+    beam = int(os.environ.get("WHISPER_BEAM", "1" if device == "cpu" else "5"))
     raw, _info = model.transcribe(
-        load_audio(media), word_timestamps=True, vad_filter=True, language=language
+        audio, word_timestamps=True, vad_filter=True, language=language,
+        beam_size=beam, condition_on_previous_text=False,
     )
-    segments = [
-        Segment(
+    segments = []
+    for s in raw:  # générateur : la transcription avance segment par segment
+        segments.append(Segment(
             start=s.start,
             end=s.end,
             text=s.text.strip(),
             words=[Word(w.start, w.end, w.word.strip()) for w in (s.words or []) if w.word.strip()],
-        )
-        for s in raw
-    ]
+        ))
+        if progress:
+            progress(min(s.end, total), total)
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps([asdict(s) for s in segments], ensure_ascii=False))
     return segments

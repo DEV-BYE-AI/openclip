@@ -26,6 +26,12 @@ def _noop(stage: str, frac: float, msg: str) -> None:
     log.info("[%s %3.0f%%] %s", stage, frac * 100, msg)
 
 
+def _mmss(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    return f"{h}:{rem // 60:02d}:{rem % 60:02d}" if h else f"{rem // 60}:{rem % 60:02d}"
+
+
 def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress = _noop,
                local_file: Path | None = None, local_title: str = "") -> Path:
     cs = settings.clip
@@ -39,10 +45,20 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     out_dir = out_root / src.video_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    progress("transcribe", 0.15, f"Transcription de « {src.title} »")
+    progress("transcribe", 0.15, f"Préparation de la transcription de « {src.title} »")
     transcript = work / f"{src.video_id}.transcript.json"
+    started = time.time()
+
+    def on_transcribe(done: float, total: float) -> None:
+        frac = done / total if total else 0
+        msg = f"Transcription {_mmss(done)} / {_mmss(total)}"
+        elapsed = time.time() - started
+        if frac > 0.03:
+            msg += f" · encore ~{_mmss(elapsed / frac - elapsed)}"
+        progress("transcribe", 0.15 + 0.3 * frac, msg)
+
     segments = transcribe(src.path, transcript, settings.whisper_model,
-                          settings.whisper_device, cs.language)
+                          settings.whisper_device, cs.language, progress=on_transcribe)
 
     progress("analyze", 0.45, f"Recherche des {cs.num_clips} meilleurs moments")
     highlights = find_highlights(segments, title=src.title, num_clips=cs.num_clips,
