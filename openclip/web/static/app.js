@@ -327,9 +327,22 @@ function clipCard(pid, c, rank) {
       <button class="btn btn-sm btn-yt ${up.youtube ? "done" : ""}" data-act="youtube">${up.youtube ? "✓ YouTube" : "Publier Shorts"}</button>
       <button class="btn btn-sm btn-ghost" data-act="edit">Modifier</button>
       <a class="btn btn-sm btn-ghost" href="/api/projects/${encodeURIComponent(pid)}/clips/${c.n}/download">Télécharger</a>
+      ${canShareFiles() ? `<button class="btn btn-sm btn-primary full" data-act="share">📲 Partager vers TikTok / YouTube…</button>` : ""}
       <button class="btn btn-sm btn-ghost full" data-act="copy">Copier la légende</button>
     </div>
   </article>`;
+}
+
+function canShareFiles() {
+  try {
+    return window.isSecureContext && !!navigator.canShare &&
+      navigator.canShare({ files: [new File([""], "t.mp4", { type: "video/mp4" })] });
+  } catch { return false; }
+}
+const shareCache = new Map();
+
+function captionOf(clip) {
+  return [clip.title, clip.description, (clip.hashtags || []).map((t) => "#" + t).join(" ")].filter(Boolean).join("\n");
 }
 
 async function onClipAction(e, m) {
@@ -339,6 +352,33 @@ async function onClipAction(e, m) {
   const clip = m.clips[n - 1];
   const act = btn.dataset.act;
   if (act === "edit") return openEditor(m, n);
+  if (act === "share") {
+    // Le partage doit suivre directement un toucher : 1er toucher = préparation (téléchargement),
+    // 2e toucher = ouverture du menu de partage du téléphone (TikTok, YouTube, Instagram…)
+    const key = `${m.id}/${n}/${clip.version || 1}`;
+    const caption = captionOf(clip);
+    try { await navigator.clipboard.writeText(caption); } catch {}
+    if (!shareCache.has(key)) {
+      btn.disabled = true; btn.textContent = "Préparation…";
+      try {
+        const res = await fetch(`/media/${encodeURIComponent(m.id)}/${encodeURIComponent(clip.file)}?v=${clip.version || 1}`);
+        if (!res.ok) throw new Error("vidéo introuvable");
+        const name = (clip.title || "clip").replace(/[^\p{L}\p{N} _-]/gu, "").slice(0, 50).trim() || "clip";
+        shareCache.set(key, new File([await res.blob()], `${name}.mp4`, { type: "video/mp4" }));
+        btn.textContent = "📲 Toucher pour partager";
+        toast("Prêt : touche encore pour choisir TikTok (légende copiée)");
+      } catch (err) { btn.textContent = "📲 Partager vers TikTok / YouTube…"; toast(err.message, true); }
+      btn.disabled = false;
+      return;
+    }
+    try {
+      await navigator.share({ files: [shareCache.get(key)], title: clip.title, text: caption });
+      toast("Dans TikTok, colle la légende (déjà copiée) 👍");
+    } catch (err) {
+      if (err.name !== "AbortError") toast("Partage impossible : utilise « Télécharger »", true);
+    }
+    return;
+  }
   if (act === "copy") {
     const text = [clip.title, clip.description, (clip.hashtags || []).map((t) => "#" + t).join(" ")].filter(Boolean).join("\n");
     try { await navigator.clipboard.writeText(text); toast("Légende copiée"); } catch { toast("Copie impossible", true); }
