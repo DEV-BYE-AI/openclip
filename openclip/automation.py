@@ -36,7 +36,15 @@ DEFAULTS = {
     "slots": ["12:00", "18:00", "21:00"],
     "timezone": "Europe/Paris",
     "max_video_minutes": 90,
+    # recherches de tendances : [{query, added_at, seen: [video_id]}]
+    "searches": [],
+    "search_period": "week",      # today | week | month : vidéos publiées sur cette période
+    "search_min_views": 10000,
+    "max_new_videos_per_day": 4,  # limite la charge du serveur (chaque vidéo = plusieurs minutes)
 }
+# filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
+SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
+SEARCH_EVERY = 60 * 60
 FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
 NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
 CHECK_EVERY = 20 * 60
@@ -71,7 +79,7 @@ def save_settings(changes: dict) -> dict:
     with _lock:
         data = load_settings()
         for key, value in changes.items():
-            if key in DEFAULTS and key != "channels":
+            if key in DEFAULTS and key not in {"channels", "searches"}:
                 data[key] = value
         data["slots"] = sorted({s for s in data["slots"] if _valid_slot(s)})
         _write(_files()[0], data)
@@ -160,6 +168,63 @@ def remove_channel(channel_id: str) -> None:
         _write(_files()[0], data)
 
 
+# --------------------------------------------------------------------------- recherches (tendances)
+
+def search_videos(query: str, period: str = "week", limit: int = 30) -> list[dict]:
+    """Vidéos YouTube récentes les plus vues pour une recherche (sans les télécharger)."""
+    import urllib.parse
+
+    import yt_dlp
+
+    from .download import cookies_path
+
+    url = (f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+           f"&sp={SEARCH_SP.get(period, SEARCH_SP['week'])}")
+    opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "playlistend": limit}
+    cookies = cookies_path()
+    if cookies:
+        opts["cookiefile"] = str(cookies)
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    out = []
+    for e in info.get("entries") or []:
+        vid = e.get("id")
+        if not vid or len(vid) != 11:
+            continue
+        out.append({"id": vid, "title": e.get("title") or "", "duration": e.get("duration") or 0,
+                    "views": e.get("view_count") or 0, "channel": e.get("channel") or e.get("uploader") or "",
+                    "url": f"https://www.youtube.com/watch?v={vid}"})
+    return out
+
+
+def add_search(query: str) -> dict:
+    query = query.strip()
+    if len(query) < 2:
+        raise ValueError("recherche trop courte")
+    with _lock:
+        data = load_settings()
+        if any(s["query"].lower() == query.lower() for s in data["searches"]):
+            raise ValueError("recherche déjà suivie")
+        item = {"query": query, "added_at": time.time(), "seen": []}
+        data["searches"].append(item)
+        _write(_files()[0], data)
+        return item
+
+
+def remove_search(query: str) -> None:
+    with _lock:
+        data = load_settings()
+        data["searches"] = [s for s in data["searches"] if s["query"] != query]
+        _write(_files()[0], data)
+
+
+def pick_trending(videos: list[dict], seen: set, min_views: int, max_minutes: float, count: int) -> list[dict]:
+    """Les vidéos les plus vues, pas encore traitées, de 2 min à `max_minutes`."""
+    ok = [v for v in videos if v["id"] not in seen and v["views"] >= min_views
+          and (not v["duration"] or 120 <= v["duration"] <= max_minutes * 60)]
+    return sorted(ok, key=lambda v: -v["views"])[:count]
+
+
 # --------------------------------------------------------------------------- file d'attente
 
 def enqueue_project(project_dir: Path, min_score: float) -> int:
@@ -223,6 +288,7 @@ class Scheduler:
         self.publish = publish        # publish(project_dir, clip_index, target) -> résultat
         self.out_root = out_root
         self.last_check = 0.0
+        self.last_search = 0.0
         self.last_slot: str | None = _read(config.HOME_DIR / "automation-state.json", {}).get("last_slot")
         self.status = "arrêté"
         self._stop = threading.Event()
@@ -247,13 +313,17 @@ class Scheduler:
             return
         if time.time() - self.last_check >= CHECK_EVERY:
             self.check_channels(cfg)
+        if cfg["searches"] and time.time() - self.last_search >= SEARCH_EVERY:
+            self.check_searches(cfg)
         from zoneinfo import ZoneInfo
 
         now = now or datetime.now(ZoneInfo(cfg["timezone"]))
         key = due_slot(now, cfg["slots"], self.last_slot)
         if key:
             self.last_slot = key
-            _write(config.HOME_DIR / "automation-state.json", {"last_slot": key})
+            path = config.HOME_DIR / "automation-state.json"
+            with _lock:
+                _write(path, {**_read(path, {}), "last_slot": key})
             self.publish_next(cfg)
         self.status = "actif"
 
@@ -269,16 +339,69 @@ class Scheduler:
                 continue
             new = [v for v in feed["videos"] if v["id"] not in set(ch.get("seen", []))]
             for video in reversed(new):  # les plus anciennes d'abord
+                if self._budget_left(cfg) <= 0:
+                    break  # on reprendra demain : la vidéo n'est pas marquée comme vue
                 self._remember(ch["channel_id"], video["id"])
                 if "/shorts/" in video["url"]:
                     continue
                 found += 1
-                self.submit(video["url"], {
-                    "num_clips": cfg["clips_per_video"], "preset": cfg["preset"],
-                    "caption_style": cfg["caption_style"], "crop_mode": cfg["crop_mode"],
-                    "max_video_minutes": cfg["max_video_minutes"],
-                }, lambda project_dir, ms=cfg["min_score"]: project_dir and enqueue_project(project_dir, ms))
+                self._submit(video["url"], cfg)
         return found
+
+    # -- plafond de vidéos traitées par jour (le serveur n'a que 2 cœurs)
+    def _budget_left(self, cfg: dict) -> int:
+        state = _read(config.HOME_DIR / "automation-state.json", {})
+        today = time.strftime("%Y-%m-%d")
+        used = state.get("processed", {}).get(today, 0)
+        return max(0, int(cfg["max_new_videos_per_day"]) - used)
+
+    def _spend(self) -> None:
+        path = config.HOME_DIR / "automation-state.json"
+        with _lock:
+            state = _read(path, {})
+            today = time.strftime("%Y-%m-%d")
+            state["processed"] = {today: state.get("processed", {}).get(today, 0) + 1}
+            _write(path, state)
+
+    def _submit(self, url: str, cfg: dict) -> None:
+        self._spend()
+        self.submit(url, {
+            "num_clips": cfg["clips_per_video"], "preset": cfg["preset"],
+            "caption_style": cfg["caption_style"], "crop_mode": cfg["crop_mode"],
+            "max_video_minutes": cfg["max_video_minutes"],
+        }, lambda project_dir, ms=cfg["min_score"]: project_dir and enqueue_project(project_dir, ms))
+
+    def check_searches(self, cfg: dict | None = None) -> int:
+        """Cherche les vidéos tendance pour chaque recherche suivie et lance les meilleures."""
+        cfg = cfg or load_settings()
+        self.last_search = time.time()
+        found = 0
+        for item in cfg["searches"]:
+            budget = self._budget_left(cfg)
+            if budget <= 0:
+                break
+            try:
+                videos = search_videos(item["query"], cfg["search_period"])
+            except Exception as exc:
+                log.warning("recherche « %s » impossible : %s", item["query"], exc)
+                continue
+            seen = set(item.get("seen", []))
+            for ch in cfg["channels"]:
+                seen |= set(ch.get("seen", []))
+            for video in pick_trending(videos, seen, int(cfg["search_min_views"]),
+                                       float(cfg["max_video_minutes"]), min(budget, 2)):
+                self._remember_search(item["query"], video["id"])
+                self._submit(video["url"], cfg)
+                found += 1
+        return found
+
+    def _remember_search(self, query: str, video_id: str) -> None:
+        with _lock:
+            data = load_settings()
+            for s_ in data["searches"]:
+                if s_["query"] == query:
+                    s_["seen"] = (s_.get("seen", []) + [video_id])[-500:]
+            _write(_files()[0], data)
 
     def _remember(self, channel_id: str, video_id: str) -> None:
         with _lock:

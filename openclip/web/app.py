@@ -499,7 +499,30 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     @app.post("/api/automation/check")
     def automation_check():
-        return {"new_videos": scheduler.check_channels()}
+        return {"new_videos": scheduler.check_channels() + scheduler.check_searches()}
+
+    @app.post("/api/automation/searches")
+    async def automation_add_search(request: Request):
+        try:
+            return automation.add_search((await request.json()).get("query", ""))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/automation/searches")
+    def automation_remove_search(query: str):
+        automation.remove_search(query)
+        return {"ok": True}
+
+    @app.get("/api/automation/preview")
+    def automation_preview(query: str):
+        """Aperçu des vidéos tendance qu'une recherche trouverait maintenant."""
+        cfg = automation.load_settings()
+        try:
+            videos = automation.search_videos(query, cfg["search_period"])
+        except Exception as exc:
+            raise HTTPException(400, f"recherche impossible : {exc}")
+        return automation.pick_trending(videos, set(), int(cfg["search_min_views"]),
+                                        float(cfg["max_video_minutes"]), 10)
 
     @app.post("/api/automation/publish-next")
     def automation_publish_next():

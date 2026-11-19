@@ -544,6 +544,24 @@ async function renderAuto() {
         <button class="btn btn-sm btn-ghost" data-unfollow="${esc(c.channel_id)}">Retirer</button>
       </div>`).join("") : `<div class="empty">Aucune chaîne. Ajoute le lien d'une chaîne dont tu as l'autorisation de clipper.</div>`}</div>
 
+    <div class="section-title"><h2>Recherches tendances</h2></div>
+    <p class="muted" style="margin-top:-6px">Toutes les heures, OpenClip cherche les vidéos YouTube les plus vues de la période pour chaque recherche, et transforme les meilleures en clips.</p>
+    <form class="url-row" id="search-add"><input id="search-q" placeholder="ex. GTA 6, GTA 6 gameplay, Rockstar…" autocomplete="off"><button class="btn btn-primary" style="padding:12px 18px">Ajouter</button></form>
+    <div class="jobs" style="margin-top:10px">${a.searches.length ? a.searches.map((q) => `
+      <div class="job">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div><b>🔎 ${esc(q.query)}</b><div class="muted" style="font-size:12px">${(q.seen || []).length} vidéo(s) déjà traitée(s)</div></div>
+          <div style="display:flex;gap:6px"><button class="btn btn-sm btn-ghost" data-preview="${esc(q.query)}">Aperçu</button><button class="btn btn-sm btn-ghost" data-unsearch="${esc(q.query)}">Retirer</button></div>
+        </div>
+        <div class="preview" data-for="${esc(q.query)}"></div>
+      </div>`).join("") : `<div class="empty">Aucune recherche. Ajoute par exemple « GTA 6 ».</div>`}</div>
+    <div class="launcher" style="margin:12px 0 0;max-width:none"><div class="options">
+      <div><div class="opt-label">Vidéos publiées</div>${chips("search_period", [["today", "Aujourd'hui"], ["week", "Cette semaine"], ["month", "Ce mois"]], a.search_period)}</div>
+      <div><div class="opt-label">Vues minimum</div>${chips("search_min_views", [[1000, "1 k"], [10000, "10 k"], [50000, "50 k"], [200000, "200 k"]], a.search_min_views)}</div>
+      <div><div class="opt-label">Nouvelles vidéos par jour (max)</div>${chips("max_new_videos_per_day", [[2, "2"], [4, "4"], [8, "8"]], a.max_new_videos_per_day)}</div>
+    </div>
+    <div class="tip" style="padding:0 12px 12px">⚠️ Clipper les vidéos d'autres créateurs sans leur accord expose à des réclamations de droits d'auteur et n'est pas monétisable (« contenu réutilisé »). Privilégie les créateurs qui autorisent les clips, et ajoute ta valeur (titre, accroche, montage).</div></div>
+
     <div class="section-title"><h2>Réglages</h2></div>
     <div class="launcher" style="margin:0;max-width:none"><div class="options">
       <div><div class="opt-label">Clips par vidéo</div>${chips("clips_per_video", [[1, "1"], [2, "2"], [3, "3"], [5, "5"]], a.clips_per_video)}</div>
@@ -578,7 +596,7 @@ async function renderAuto() {
   $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]"); if (!b) return;
-    const num = ["clips_per_video", "min_score", "max_video_minutes"].includes(g.dataset.group);
+    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day"].includes(g.dataset.group);
     save({ [g.dataset.group]: num ? Number(b.dataset.v) : b.dataset.v });
   }));
   view.querySelectorAll("[data-target]").forEach((c) => (c.onchange = () => save({ targets: [...view.querySelectorAll("[data-target]:checked")].map((x) => x.dataset.target) })));
@@ -590,6 +608,23 @@ async function renderAuto() {
     try { const c = await api("/api/automation/channels", { method: "POST", body: { url: $("#auto-url").value.trim() } }); toast(`Chaîne suivie : ${c.name}`); renderAuto(); }
     catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Suivre"; }
   };
+  $("#search-add").onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api("/api/automation/searches", { method: "POST", body: { query: $("#search-q").value } }); toast("Recherche ajoutée"); renderAuto(); }
+    catch (err) { toast(err.message, true); }
+  };
+  view.querySelectorAll("[data-unsearch]").forEach((b) => (b.onclick = async () => {
+    await api(`/api/automation/searches?query=${encodeURIComponent(b.dataset.unsearch)}`, { method: "DELETE" }); renderAuto();
+  }));
+  view.querySelectorAll("[data-preview]").forEach((b) => (b.onclick = async () => {
+    const box = view.querySelector(`.preview[data-for="${CSS.escape(b.dataset.preview)}"]`);
+    box.innerHTML = `<div class="muted" style="font-size:13px;margin-top:8px">Recherche…</div>`;
+    try {
+      const vids = await api(`/api/automation/preview?query=${encodeURIComponent(b.dataset.preview)}`);
+      const fmtViews = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + " M" : n >= 1e3 ? Math.round(n / 1e3) + " k" : n;
+      box.innerHTML = vids.length ? `<ol class="guide" style="margin-top:10px">${vids.map((v) => `<li><a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a> <span class="muted">· ${fmtViews(v.views)} vues · ${fmtTime(v.duration || 0)} · ${esc(v.channel)}</span></li>`).join("")}</ol>` : `<div class="muted" style="font-size:13px;margin-top:8px">Aucune vidéo ne passe les filtres (vues minimum, durée).</div>`;
+    } catch (err) { box.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  }));
   view.querySelectorAll("[data-unfollow]").forEach((b) => (b.onclick = async () => { if (!confirm("Ne plus suivre cette chaîne ?")) return; await api(`/api/automation/channels/${b.dataset.unfollow}`, { method: "DELETE" }); renderAuto(); }));
   view.querySelectorAll("[data-dequeue]").forEach((b) => (b.onclick = async () => { await api(`/api/automation/queue/${b.dataset.dequeue}`, { method: "DELETE" }); renderAuto(); }));
   $("#auto-check").onclick = async (e) => {

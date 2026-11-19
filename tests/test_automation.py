@@ -81,3 +81,35 @@ def test_disabled_does_nothing(home):
     calls = []
     auto.Scheduler(lambda *a: calls.append(a), lambda *a: calls.append(a), home).tick(datetime(2026, 1, 1, 12, 0))
     assert calls == []
+
+
+def test_trending_search_picks_most_viewed(home, monkeypatch):
+    out = home / "out"
+    auto.save_settings({"enabled": True, "search_min_views": 1000, "max_new_videos_per_day": 3,
+                        "max_video_minutes": 60, "slots": []})
+    auto.add_search("GTA 6")
+    vids = [
+        {"id": "a" * 11, "title": "petite", "duration": 600, "views": 500, "channel": "x", "url": "u/a"},
+        {"id": "b" * 11, "title": "top", "duration": 900, "views": 90000, "channel": "x", "url": "u/b"},
+        {"id": "c" * 11, "title": "trop longue", "duration": 3 * 3600, "views": 99999, "channel": "x", "url": "u/c"},
+        {"id": "d" * 11, "title": "short", "duration": 40, "views": 50000, "channel": "x", "url": "u/d"},
+        {"id": "e" * 11, "title": "deuxième", "duration": 1200, "views": 20000, "channel": "x", "url": "u/e"},
+    ]
+    monkeypatch.setattr(auto, "search_videos", lambda q, period="week", limit=30: vids)
+    submitted = []
+    sch = auto.Scheduler(lambda url, o, cb: submitted.append(url), lambda *a: {}, out)
+    assert sch.check_searches() == 2
+    assert submitted == ["u/b", "u/e"]
+    assert sch.check_searches() == 0  # déjà traitées
+    assert sch._budget_left(auto.load_settings()) == 1  # 3 par jour - 2
+
+
+def test_daily_budget_stops_processing(home, monkeypatch):
+    auto.save_settings({"max_new_videos_per_day": 1, "search_min_views": 0})
+    auto.add_search("GTA 6")
+    vids = [{"id": c * 11, "title": c, "duration": 600, "views": 10, "channel": "", "url": "u/" + c} for c in "xyz"]
+    monkeypatch.setattr(auto, "search_videos", lambda *a, **k: vids)
+    submitted = []
+    sch = auto.Scheduler(lambda url, o, cb: submitted.append(url), lambda *a: {}, home)
+    sch.check_searches()
+    assert len(submitted) == 1
