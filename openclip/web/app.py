@@ -254,7 +254,7 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         from ..uploaders import tiktok, youtube
         return {
             "accounts": {
-                "claude": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "claude": _real_key(os.environ.get("ANTHROPIC_API_KEY", "")),
                 "tiktok": tiktok.is_connected(),
                 "tiktok_configured": bool(settings.tiktok_client_key),
                 "youtube": youtube.is_connected(),
@@ -321,6 +321,12 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         return (STATIC / "index.html").read_text(encoding="utf-8")
 
     return app
+
+
+def _real_key(key: str) -> bool:
+    """Ignore la valeur d'exemple de .env.example (sk-ant-...)."""
+    key = key.strip()
+    return len(key) > 20 and not key.endswith("...")
 
 
 def serve(host: str, port: int, out_root: Path) -> None:
