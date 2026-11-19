@@ -230,7 +230,7 @@ function jobCard(j) {
   return `<div class="job ${j.stage === "error" ? "error" : ""}">
     <div class="job-head"><span>${esc(j.message)}</span>
       ${j.project && done ? `<a class="btn btn-sm" href="#/p/${encodeURIComponent(j.project)}">Voir les clips</a>` : `<span class="muted">${Math.round(j.progress * 100)}%</span>`}</div>
-    <div class="muted" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.url)}</div>
+    <div class="muted" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${j.requested ? `${j.requested} clips demandés · ` : ""}${esc(j.url)}</div>
     <div class="steps">${STAGES.map(([k, label], i) => `<div class="step ${done || i <= idx ? "on" : ""} ${i === idx && !done ? "now" : ""}">${label}</div>`).join("")}</div>
     ${j.error ? `<div class="err">${esc(j.error)}</div>` : ""}
   </div>`;
@@ -275,6 +275,7 @@ async function renderProject(pid) {
           <div class="stat"><b>${published}</b>publiés</div>
           ${m.source.url ? `<div class="stat"><a href="${esc(m.source.url)}" target="_blank" rel="noopener">Vidéo source ↗</a></div>` : ""}
           <button class="stat" id="to-queue" style="cursor:pointer">⏱ Ajouter à la file auto</button>
+          <button class="stat" id="more" style="cursor:pointer;color:var(--text)">＋ D'autres clips</button>
         </div>
       </div>
     </div>
@@ -283,6 +284,16 @@ async function renderProject(pid) {
     </div>
     <div class="clips" id="clips"></div>`;
 
+  $("#more").onclick = async () => {
+    const prefs = loadPrefs();
+    const n = Number(prompt("Combien de nouveaux clips ? (d'autres moments que ceux déjà montés)", prefs.num_clips || 5));
+    if (!n) return;
+    try {
+      await api(`/api/projects/${encodeURIComponent(m.id)}/more`, { method: "POST", body: { ...prefs, num_clips: n, auto_publish: [] } });
+      toast("C'est parti ! Suis l'avancement dans « Créer »");
+      location.hash = "#/";
+    } catch (err) { toast(err.message, true); }
+  };
   $("#to-queue").onclick = async () => {
     try { const r = await api("/api/automation/queue", { method: "POST", body: { project: m.id } }); toast(r.added ? `${r.added} clip(s) ajouté(s) à la file automatique` : "Déjà dans la file"); }
     catch (err) { toast(err.message, true); }
@@ -334,7 +345,8 @@ function clipCard(pid, c, rank) {
       <button class="btn btn-sm btn-ghost" data-act="edit">Modifier</button>
       <a class="btn btn-sm btn-ghost" href="/api/projects/${encodeURIComponent(pid)}/clips/${c.n}/download">Télécharger</a>
       ${canShareFiles() ? `<button class="btn btn-sm btn-primary full" data-act="share">📲 Partager vers TikTok / YouTube…</button>` : ""}
-      <button class="btn btn-sm btn-ghost full" data-act="copy">Copier la légende</button>
+      <button class="btn btn-sm btn-ghost" data-act="copy">Copier la légende</button>
+      <button class="btn btn-sm btn-ghost" data-act="delete" style="color:var(--danger)">Supprimer</button>
     </div>
   </article>`;
 }
@@ -358,6 +370,12 @@ async function onClipAction(e, m) {
   const clip = m.clips[n - 1];
   const act = btn.dataset.act;
   if (act === "edit") return openEditor(m, n);
+  if (act === "delete") {
+    if (!confirm(`Supprimer le clip « ${clip.title} » ?`)) return;
+    try { await api(`/api/projects/${encodeURIComponent(m.id)}/clips/${n}`, { method: "DELETE" }); toast("Clip supprimé"); renderProject(m.id); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
   if (act === "share") {
     // Le partage doit suivre directement un toucher : 1er toucher = préparation (téléchargement),
     // 2e toucher = ouverture du menu de partage du téléphone (TikTok, YouTube, Instagram…)

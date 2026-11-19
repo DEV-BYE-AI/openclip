@@ -110,3 +110,50 @@ def test_public_legal_pages_without_password(tmp_path: Path, monkeypatch):
         assert r.status_code == 200 and "Studio Test" in r.text
     assert client.get("/api/projects").status_code == 401  # le reste reste protégé
     assert client.get("/legal/../api/projects").status_code == 401
+
+
+def test_more_clips_are_different_and_delete(tmp_path: Path, monkeypatch):
+    import subprocess
+    import time
+
+    import openclip.config as config
+    import openclip.pipeline as pipeline
+    from openclip.transcribe import Segment, Word
+
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    client = TestClient(create_app(tmp_path / "out"))
+    src = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=15",
+                    "-f", "lavfi", "-i", "sine", "-t", "60", "-shortest", str(src)], check=True)
+    text = "Personne ne te dit ça mais voici le secret pour gagner 1000 euros ?".split()
+    words = [Word(i * 0.5, i * 0.5 + 0.4, text[i % len(text)]) for i in range(118)]
+    segs = [Segment(words[k].start, words[min(k + 5, len(words) - 1)].end,
+                    " ".join(w.text for w in words[k:k + 6]), words[k:k + 6]) for k in range(0, len(words), 6)]
+    monkeypatch.setattr(pipeline, "transcribe", lambda *a, **k: segs)
+
+    def wait(job_id):
+        for _ in range(200):
+            j = next(x for x in client.get("/api/jobs").json() if x["id"] == job_id)
+            if j["stage"] in {"done", "error"}:
+                return j
+            time.sleep(0.3)
+
+    up = client.post("/api/uploads", content=src.read_bytes(), headers={"X-Filename": "v.mp4"}).json()
+    opts = {"num_clips": 2, "min_seconds": 6, "max_seconds": 10, "crop_mode": "center", "jump_cuts": False}
+    j = wait(client.post("/api/jobs", json={"url": "upload:" + up["id"], **opts}).json()["id"])
+    assert j["stage"] == "done", j
+    pid = j["project"]
+    first = client.get(f"/api/projects/{pid}").json()["clips"]
+    assert len(first) == 2
+
+    j2 = wait(client.post(f"/api/projects/{pid}/more", json=opts).json()["id"])
+    assert j2["stage"] == "done", j2
+    clips = client.get(f"/api/projects/{pid}").json()["clips"]
+    assert len(clips) == 4 and len({c["file"] for c in clips}) == 4
+    spans = sorted((c["start"], c["end"]) for c in clips)
+    assert all(b[0] >= a[1] - 1.6 for a, b in zip(spans, spans[1:]))  # d'autres moments
+
+    assert client.delete(f"/api/projects/{pid}/clips/1").status_code == 200
+    left = client.get(f"/api/projects/{pid}").json()["clips"]
+    assert len(left) == 3 and not (tmp_path / "out" / pid / first[0]["file"]).exists()

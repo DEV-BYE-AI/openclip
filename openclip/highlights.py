@@ -111,6 +111,7 @@ def find_highlights(
     max_s: float,
     model: str = "claude-opus-5-5",
     media=None,
+    exclude=None,
 ) -> list[Highlight]:
     """Choisit les meilleurs passages.
 
@@ -118,20 +119,22 @@ def find_highlights(
     configurée, Claude choisit les passages et rédige les textes ; en cas d'échec on
     revient à l'analyse locale.
     """
-    from .analyzer import analyze
+    from .analyzer import analyze, overlaps_any
 
     if not segments:
         return []
     raw: list[Highlight] = []
     if has_claude_key():
         try:
-            raw = _ask_claude(segments, title, num_clips, min_s, max_s, model)
+            raw = _ask_claude(segments, title, num_clips + len(exclude or []), min_s, max_s, model)
+            raw = [h for h in raw if not overlaps_any(h.start, h.end, exclude)]
         except Exception as exc:  # réseau, refus, quota...
             log.warning("Claude indisponible (%s) — analyse locale.", exc)
     if not raw:
         raw = analyze(segments, num_clips=num_clips, min_s=min_s, max_s=max_s,
-                      media=media, title=title)
+                      media=media, title=title, exclude=exclude)
     clips = [snap(h, segments, min_s, max_s) for h in raw]
+    clips = [c for c in clips if not overlaps_any(c.start, c.end, exclude)]
     return remove_overlaps(sorted(clips, key=lambda h: -h.score))[:num_clips]
 
 

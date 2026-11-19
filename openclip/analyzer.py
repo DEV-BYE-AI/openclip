@@ -181,8 +181,13 @@ class _SegFeat:
         self.complete = t.rstrip().endswith((".", "!", "?", "…"))
 
 
+def overlaps_any(start: float, end: float, zones, tolerance: float = 1.5) -> bool:
+    """Vrai si [start, end] chevauche une des zones de plus de `tolerance` secondes."""
+    return any(min(end, b) - max(start, a) > tolerance for a, b in zones or [])
+
+
 def analyze(segments: list[Segment], *, num_clips: int, min_s: float, max_s: float,
-            media: Path | None = None, title: str = "") -> list:
+            media: Path | None = None, title: str = "", exclude=None) -> list:
     from .highlights import Highlight
 
     segs = [s for s in segments if s.text.strip()]
@@ -230,6 +235,8 @@ def analyze(segments: list[Segment], *, num_clips: int, min_s: float, max_s: flo
         candidates.append(_score_window(window, window[0].seg.start, window[-1].seg.end, idf,
                                         video_end, lang))
 
+    if exclude:  # passages déjà montés : on cherche d'autres moments
+        candidates = [c for c in candidates if not overlaps_any(c["start"], c["end"], exclude)]
     picked = select_best(candidates, num_clips)
     return [Highlight(**c) for c in sorted(picked, key=lambda c: -c["score"])]
 

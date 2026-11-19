@@ -76,6 +76,7 @@ class Job:
     message: str = "En file d'attente"
     project: str | None = None
     error: str | None = None
+    requested: int | None = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -178,7 +179,7 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
             label = f"📁 {up[1]}"
         elif not body.url.startswith(("http://", "https://")):
             raise HTTPException(400, "lien invalide")
-        job = Job(id=uuid.uuid4().hex[:10], url=label)
+        job = Job(id=uuid.uuid4().hex[:10], url=label, requested=body.num_clips)
         jobs[job.id] = job
         heavy.submit(run_create, job, body)
         return job.__dict__
@@ -326,6 +327,36 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
                 update(job, stage="error", error=str(exc), message="Échec de la publication")
 
         light.submit(run)
+        return job.__dict__
+
+    @app.delete("/api/projects/{pid}/clips/{n}")
+    def remove_clip(pid: str, n: int):
+        from ..pipeline import delete_clip, load_manifest
+        d = project_dir(pid)
+        if not 1 <= n <= len(load_manifest(d)["clips"]):
+            raise HTTPException(404, "clip introuvable")
+        delete_clip(d, n)
+        return {"ok": True}
+
+    @app.post("/api/projects/{pid}/more")
+    async def more_clips(pid: str, request: Request):
+        """Relance l'analyse de la même vidéo pour trouver d'autres moments (ajoutés au projet)."""
+        from ..pipeline import load_manifest
+        d = project_dir(pid)
+        src = load_manifest(d)["source"]
+        opts = await request.json()
+        body = JobIn(url=src.get("url") or "upload:", **{k: v for k, v in opts.items() if k in JobIn.model_fields and k != "url"})
+        if not src.get("url"):  # vidéo envoyée depuis le téléphone : on réutilise le fichier
+            path = Path(src.get("path", ""))
+            if not path.exists():
+                raise HTTPException(400, "le fichier vidéo d'origine n'est plus sur le serveur")
+            up_id = path.stem
+            uploads[up_id] = (path, src.get("title") or path.stem)
+            body.url = "upload:" + up_id
+        job = Job(id=uuid.uuid4().hex[:10], url=src.get("title") or pid, project=pid,
+                  message="Recherche d'autres moments", requested=body.num_clips)
+        jobs[job.id] = job
+        heavy.submit(run_create, job, body)
         return job.__dict__
 
     @app.get("/api/projects/{pid}/clips/{n}/download")

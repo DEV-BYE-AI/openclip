@@ -107,19 +107,33 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
     segments = transcribe(src.path, transcript, settings.whisper_model,
                           settings.whisper_device, cs.language, progress=on_transcribe)
 
-    progress("analyze", 0.45, f"Recherche des {cs.num_clips} meilleurs moments")
+    existing = load_manifest(out_dir) if (out_dir / "clips.json").exists() else None
+    exclude = [(c["start"], c["end"]) for c in existing["clips"]] if existing else []
+    already = f" (en évitant les {len(exclude)} déjà montés)" if exclude else ""
+    progress("analyze", 0.45, f"Recherche de {cs.num_clips} moments forts{already}")
     highlights = find_highlights(segments, title=src.title, num_clips=cs.num_clips,
                                  min_s=cs.min_seconds, max_s=cs.max_seconds,
-                                 model=settings.anthropic_model, media=src.path)
+                                 model=settings.anthropic_model, media=src.path, exclude=exclude)
     if not highlights:
+        if existing:
+            raise RuntimeError("plus de nouveau passage à monter : tous les moments de cette durée "
+                               "ont déjà été utilisés (essaie une autre durée)")
         raise RuntimeError("aucun passage exploitable (vidéo sans parole ?)")
 
-    manifest = {
-        "source": asdict(src) | {"path": str(src.path), "transcript": str(transcript)},
-        "settings": asdict(cs),
-        "created_at": time.time(),
-        "clips": [],
-    }
+    if existing:
+        manifest = existing
+        manifest["source"].update({"path": str(src.path), "transcript": str(transcript)})
+    else:
+        manifest = {
+            "source": asdict(src) | {"path": str(src.path), "transcript": str(transcript)},
+            "settings": asdict(cs),
+            "created_at": time.time(),
+            "clips": [],
+        }
+    manifest["settings"] = asdict(cs)
+    import re as _re
+    numbers = [int(m.group(1)) for c in manifest["clips"] if (m := _re.search(r"clip_(\d+)", c["file"]))]
+    first = max(numbers, default=0) + 1
     ordered = sorted(highlights, key=lambda x: -x.score)
     for i, h in enumerate(ordered, 1):
         base = 0.5 + 0.48 * (i - 1) / len(ordered)
@@ -129,12 +143,13 @@ def make_clips(url: str, settings: Settings, out_root: Path, progress: Progress 
             progress("render", base + 0.48 * frac / len(ordered),
                      f"Montage du clip {i}/{len(ordered)} · {round(frac * 100)} %")
 
-        clip = {"file": f"clip_{i:02d}.mp4", **asdict(h), "style": cs.caption_style, "uploads": {}}
+        clip = {"file": f"clip_{first + i - 1:02d}.mp4", **asdict(h), "style": cs.caption_style,
+                "uploads": {}, "created_at": time.time()}
         _render(clip, out_dir, src.path, segments, cs, on_progress=on_clip)
         manifest["clips"].append(clip)
         _save(out_dir, manifest)
 
-    msg = f"{len(ordered)} clips prêts"
+    msg = f"{len(ordered)} nouveaux clips (total {len(manifest['clips'])})" if existing else f"{len(ordered)} clips prêts"
     if len(ordered) < cs.num_clips:
         msg += f" (vidéo trop courte pour {cs.num_clips} clips de {cs.min_seconds:.0f} s minimum)"
     progress("done", 1.0, msg)
@@ -176,6 +191,27 @@ def rerender(clip_dir: Path, index: int, changes: dict) -> dict:
     _render(clip, clip_dir, Path(manifest["source"]["path"]), segments, cs)
     _save(clip_dir, manifest)
     return clip
+
+
+def delete_clip(clip_dir: Path, index: int) -> None:
+    """Supprime un clip (fichiers + entrée) et met à jour la file d'attente automatique."""
+    manifest = load_manifest(clip_dir)
+    clip = manifest["clips"].pop(index - 1)
+    stem = Path(clip["file"]).stem
+    for ext in (".mp4", ".ass", ".jpg"):
+        (clip_dir / f"{stem}{ext}").unlink(missing_ok=True)
+    _save(clip_dir, manifest)
+    from . import automation
+    with automation._lock:
+        queue = []
+        for q in automation.load_queue():
+            if q["project"] == clip_dir.name:
+                if q["clip"] == index:
+                    continue
+                if q["clip"] > index:
+                    q["clip"] -= 1
+            queue.append(q)
+        automation._save_queue(queue)
 
 
 def load_manifest(clip_dir: Path) -> dict:

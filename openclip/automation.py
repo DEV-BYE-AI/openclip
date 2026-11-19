@@ -56,7 +56,7 @@ def _read(path: Path, default):
 
 
 def _write(path: Path, data) -> None:
-    config.ensure_dirs()
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     tmp.replace(path)
