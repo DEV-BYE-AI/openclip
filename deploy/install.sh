@@ -5,6 +5,7 @@
 #        -> http://IP_DU_SERVEUR:8001
 #   Mode sous-domaine (https)      : sudo bash deploy/install.sh --domain clip.mondomaine.fr
 #        -> https://clip.mondomaine.fr  (le DNS du sous-domaine doit pointer vers le serveur)
+#        Fonctionne avec Caddy (https automatique) ou nginx (+ certbot).
 #
 # Options : --port 8001   --domain <sous-domaine>
 set -euo pipefail
@@ -80,8 +81,34 @@ systemctl enable --now openclip
 systemctl restart openclip
 
 if [[ -n "$DOMAIN" ]]; then
-  if ! command -v nginx >/dev/null; then
-    echo "nginx n'est pas installé : configure ton serveur web pour rediriger $DOMAIN vers http://127.0.0.1:$PORT"
+  CADDYFILE=/etc/caddy/Caddyfile
+  if command -v caddy >/dev/null && systemctl is-active --quiet caddy && [[ -f "$CADDYFILE" ]]; then
+    say "Ajout de $DOMAIN dans Caddy (https automatique, ton site existant n'est pas modifié)"
+    BACKUP="$CADDYFILE.avant-openclip.$(date +%s)"
+    cp "$CADDYFILE" "$BACKUP"
+    # retire un éventuel ancien bloc OpenClip puis ajoute le nouveau
+    sed -i '/^# >>> openclip/,/^# <<< openclip/d' "$CADDYFILE"
+    cat >> "$CADDYFILE" <<CADDY
+
+# >>> openclip (ajouté par deploy/install.sh)
+$DOMAIN {
+	reverse_proxy 127.0.0.1:$PORT {
+		flush_interval -1
+	}
+}
+# <<< openclip
+CADDY
+    if caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+      systemctl reload caddy
+      echo "Caddy rechargé. Sauvegarde de l'ancienne config : $BACKUP"
+    else
+      echo "Configuration Caddy invalide : je remets l'ancienne pour ne rien casser."
+      cp "$BACKUP" "$CADDYFILE"
+      caddy validate --config "$CADDYFILE" --adapter caddyfile || true
+      exit 1
+    fi
+  elif ! command -v nginx >/dev/null; then
+    echo "Ni Caddy ni nginx détectés : configure ton serveur web pour rediriger $DOMAIN vers http://127.0.0.1:$PORT"
     echo "(voir deploy/nginx-openclip.conf)."
   else
     say "Ajout du site nginx $DOMAIN (ton site existant n'est pas modifié)"

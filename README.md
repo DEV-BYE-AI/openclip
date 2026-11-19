@@ -133,7 +133,8 @@ sudo bash deploy/install.sh --domain clip.mondomaine.fr
 
 Le script installe ffmpeg et Python, crée le service `openclip` (redémarre tout seul), génère un
 mot de passe pour l'interface et l'affiche à la fin. Il vérifie que le port est libre, et en mode
-sous-domaine il ajoute un site nginx séparé (annulé automatiquement si la config nginx est invalide).
+sous-domaine il ajoute un bloc dans Caddy (https automatique) ou un site nginx séparé, et remet
+l'ancienne configuration si la nouvelle est invalide.
 
 Ensuite : remplis `ANTHROPIC_API_KEY` dans `.env` puis `sudo systemctl restart openclip`.
 
