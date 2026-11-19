@@ -84,3 +84,22 @@ def test_load_audio_without_pyav(tmp_path: Path):
                     "-t", "3", str(src)], check=True)
     audio = load_audio(src)
     assert audio.dtype.name == "float32" and abs(len(audio) / 16000 - 3) < 0.1
+
+
+def test_stream_layout_graph():
+    vf = build_graph(1920, 1080, "stream", 0.5, 1080, 1920, None, cam=(0, 600, 400, 300), audio=False,
+                     progress_bar=False)
+    assert "vstack=inputs=2" in vf and "split=2[c][g]" in vf
+    top = int(vf.split("scale=1080:")[1].split(",")[0])
+    assert 0.28 * 1920 <= top <= 0.42 * 1920
+    # la partie jeu évite la caméra (à gauche) : elle commence après x=400
+    gx = int(vf.split("[g]crop=")[1].split(":")[2])
+    assert gx >= 400
+
+
+def test_no_facecam_on_plain_video(tmp_path: Path):
+    from openclip.render import detect_facecam
+    src = tmp_path / "plain.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15",
+                    "-t", "3", str(src)], check=True)
+    assert detect_facecam(src, 0, 3) is None

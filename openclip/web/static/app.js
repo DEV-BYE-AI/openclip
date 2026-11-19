@@ -111,7 +111,7 @@ function renderHome() {
         </div>
         <div>
           <div class="opt-label">Cadrage</div>
-          ${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], p.crop_mode)}
+          ${chips("crop_mode", [["face", "Intelligent"], ["stream", "Caméra + jeu"], ["center", "Centré"], ["blur", "Fond flou"]], p.crop_mode)}
         </div>
         <div class="opt-wide">
           <div class="opt-label">Style des sous-titres</div>
@@ -603,7 +603,7 @@ async function renderAuto() {
       <div><div class="opt-label">Clips par vidéo</div>${chips("clips_per_video", [[1, "1"], [3, "3"], [5, "5"], [8, "8"], [12, "12"]], a.clips_per_video)}</div>
       <div><div class="opt-label">Score minimum pour publier</div>${chips("min_score", [[40, "40"], [55, "55"], [70, "70"], [80, "80"]], a.min_score)}</div>
       <div><div class="opt-label">Durée des clips</div>${chips("preset", Object.keys(PRESET_INFO).map((k) => [k, PRESET_INFO[k][0], PRESET_INFO[k][1]]), a.preset)}</div>
-      <div><div class="opt-label">Cadrage</div>${chips("crop_mode", [["face", "Intelligent"], ["center", "Centré"], ["blur", "Fond flou"]], a.crop_mode)}</div>
+      <div><div class="opt-label">Cadrage</div>${chips("crop_mode", [["face", "Intelligent"], ["stream", "Caméra + jeu"], ["center", "Centré"], ["blur", "Fond flou"]], a.crop_mode)}</div>
       <div><div class="opt-label">Style des sous-titres</div>${chips("caption_style", Object.entries(META.styles).map(([k, l]) => [k, l.split(" — ")[0]]), a.caption_style)}</div>
       <div><div class="opt-label">Vidéos sources max</div>${chips("max_video_minutes", [[30, "30 min"], [60, "1 h"], [90, "1 h 30"], [180, "3 h"]], a.max_video_minutes)}</div>
       <div class="opt-wide"><div class="opt-label">Publier sur</div>
