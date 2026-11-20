@@ -613,6 +613,23 @@ async function renderAuto() {
         <button class="btn btn-sm btn-ghost" data-unfollow="${esc(c.channel_id)}">Retirer</button>
       </div>`).join("") : `<div class="empty">Aucune chaîne. Ajoute le lien d'une chaîne dont tu as l'autorisation de clipper.</div>`}</div>
 
+    <div class="section-title"><h2>🔴 Lives suivis</h2><button class="btn btn-sm btn-ghost" id="live-check">Vérifier maintenant</button></div>
+    <p class="muted" style="margin-top:-6px">Pendant un live, OpenClip enregistre le flux par morceaux et clippe chaque morceau dès qu'il est terminé (Twitch, YouTube, Kick).</p>
+    <form class="url-row" id="live-add"><input id="live-url" placeholder="https://www.twitch.tv/nom ou https://www.youtube.com/@nom" autocomplete="off"><button class="btn btn-primary" style="padding:12px 18px">Suivre</button></form>
+    <div class="jobs" style="margin-top:10px">${(a.lives || []).length ? a.lives.map((l) => {
+      const st = (a.lives_status || {})[l.url] || {};
+      const badge = { recording: "🔴 En direct", processing: "🔴 En direct", offline: "⚪️ Hors ligne", busy: "🟠 En pause", waiting: "🟠 En attente", error: "⚠️ Erreur" }[st.status] || "⏳ Pas encore vérifié";
+      return `<div class="job" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="min-width:0"><b>${esc(l.name)}</b> <span class="muted" style="font-size:12px">${badge}</span>
+          <div class="muted" style="font-size:12px">${esc(st.message || "Vérification toutes les 5 minutes")}${st.chunks ? ` · ${st.chunks} morceau(x) clippé(s)` : ""}</div>
+          ${st.title ? `<div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(st.title)}</div>` : ""}</div>
+        <button class="btn btn-sm btn-ghost" data-unlive="${esc(l.url)}">Retirer</button></div>`;
+    }).join("") : `<div class="empty">Aucun live suivi. Ajoute un streamer qui autorise les clips (idéalement dans le cadre d'un programme de clippeurs).</div>`}</div>
+    <div class="launcher" style="margin:12px 0 0;max-width:none"><div class="options">
+      <div><div class="opt-label">Durée des morceaux</div>${chips("live_chunk_minutes", [[15, "15 min"], [30, "30 min"], [60, "1 h"]], a.live_chunk_minutes || 30)}</div>
+      <div class="tip" style="align-self:end">Un seul live à la fois est conseillé sur ce serveur : chaque morceau de 30 min demande environ 10 à 20 min de montage.</div>
+    </div></div>
+
     <div class="section-title"><h2>Recherches tendances</h2></div>
     <p class="muted" style="margin-top:-6px">Toutes les heures, OpenClip cherche les vidéos YouTube les plus vues de la période pour chaque recherche, et transforme les meilleures en clips.</p>
     <form class="url-row" id="search-add"><input id="search-q" placeholder="ex. GTA 6, GTA 6 gameplay, Rockstar…" autocomplete="off"><button class="btn btn-primary" style="padding:12px 18px">Ajouter</button></form>
@@ -687,7 +704,7 @@ async function renderAuto() {
   $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]"); if (!b) return;
-    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day"].includes(g.dataset.group);
+    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day", "live_chunk_minutes"].includes(g.dataset.group);
     save({ [g.dataset.group]: num ? Number(b.dataset.v) : b.dataset.v });
   }));
   view.querySelectorAll("[data-target]").forEach((c) => (c.onchange = () => save({ targets: [...view.querySelectorAll("[data-target]:checked")].map((x) => x.dataset.target) })));
@@ -698,6 +715,19 @@ async function renderAuto() {
     const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Recherche…";
     try { const c = await api(q("/api/automation/channels"), { method: "POST", body: { url: $("#auto-url").value.trim() } }); toast(`Chaîne suivie : ${c.name}`); renderAuto(); }
     catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Suivre"; }
+  };
+  $("#live-add").onsubmit = async (e) => {
+    e.preventDefault();
+    try { const l = await api(q("/api/automation/lives"), { method: "POST", body: { url: $("#live-url").value.trim() } }); toast(`Live suivi : ${l.name}`); renderAuto(); }
+    catch (err) { toast(err.message, true); }
+  };
+  view.querySelectorAll("[data-unlive]").forEach((b) => (b.onclick = async () => {
+    await api(q(`/api/automation/lives?url=${encodeURIComponent(b.dataset.unlive)}`), { method: "DELETE" }); renderAuto();
+  }));
+  $("#live-check").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Vérification…";
+    try { await api(q("/api/automation/lives/check"), { method: "POST" }); } catch (err) { toast(err.message, true); }
+    renderAuto();
   };
   $("#search-add").onsubmit = async (e) => {
     e.preventDefault();

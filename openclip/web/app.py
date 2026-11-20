@@ -530,8 +530,56 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
 
     scheduler = automation.Scheduler(auto_submit, auto_publish, out_root)
     app.state.scheduler = scheduler
+
+    # ---------- lives : morceaux enregistrés envoyés au montage ----------
+    from ..live import LiveManager
+
+    def live_submit(path: Path, title: str, options: dict, profile_id: str) -> None:
+        finished = options.pop("_on_finished", None)
+        up_id = path.stem
+        uploads[up_id] = (path, title)
+        job = Job(id=uuid.uuid4().hex[:10], url=f"🔴 {title}", kind="create", requested=options.get("num_clips"),
+                  message="Live : morceau en file d'attente")
+        jobs[job.id] = job
+        with automation.use_profile(profile_id):
+            min_score = automation.load_settings()["min_score"]
+
+        def on_done(project_dir):
+            try:
+                if project_dir:
+                    automation._enqueue_for(profile_id, project_dir, min_score)
+            finally:
+                if finished:
+                    finished()
+
+        heavy.submit(run_create, job, JobIn(url="upload:" + up_id, **options), on_done)
+
+    lives = LiveManager(out_root, live_submit,
+                        max_parallel=int(os.environ.get("OPENCLIP_MAX_LIVES", "2")))
+    app.state.lives = lives
     if os.environ.get("OPENCLIP_SCHEDULER", "1") != "0":
         scheduler.start()
+        lives.start()
+
+    @app.post("/api/automation/lives")
+    async def automation_add_live(request: Request, profile: str = "main"):
+        try:
+            return in_profile(profile, automation.add_live, (await request.json()).get("url", ""))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/automation/lives")
+    def automation_remove_live(url: str, profile: str = "main"):
+        in_profile(profile, automation.remove_live, url)
+        return {"ok": True}
+
+    @app.post("/api/automation/lives/check")
+    def automation_check_lives(profile: str = "main"):
+        for key in list(lives.last_check):
+            if key.startswith(f"{profile}|"):
+                lives.last_check[key] = 0
+        lives.tick()
+        return lives.status(profile)
 
     def in_profile(profile: str, fn, *args):
         if profile != "main" and not any(p["id"] == profile for p in automation.list_profiles()):
@@ -582,6 +630,7 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
             queue = sorted(automation.load_queue(), key=lambda q: (q["status"] != "pending", -q["score"]))
             via = bool(settings.upload_post_key and "tiktok" in settings.upload_post_platforms)
             return {**cfg, "profile": profile, "queue": queue[:100], "status": scheduler.status,
+                    "lives_status": app.state.lives.status(profile),
                     "tiktok_own": tiktok.is_connected(profile), "tiktok_via_upload_post": via,
                     "connected": {"tiktok": bool(tiktok.is_connected(profile) or via),
                                   "youtube": bool(youtube.is_connected() or

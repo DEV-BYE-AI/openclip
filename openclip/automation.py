@@ -42,6 +42,8 @@ DEFAULTS = {
     "search_min_views": 10000,
     "max_new_videos_per_day": 4,  # limite la charge du serveur (chaque vidéo = plusieurs minutes)
     "upload_post_user": "",       # profil Upload-Post de ce compte (si publication via Upload-Post)
+    "lives": [],                  # chaînes dont on clippe les lives : [{url, name, added_at}]
+    "live_chunk_minutes": 30,     # durée des morceaux enregistrés pendant un live
 }
 # filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
 SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
@@ -152,7 +154,7 @@ def save_settings(changes: dict) -> dict:
     with _lock:
         data = load_settings()
         for key, value in changes.items():
-            if key in DEFAULTS and key not in {"channels", "searches"}:
+            if key in DEFAULTS and key not in {"channels", "searches", "lives"}:
                 data[key] = value
         data["slots"] = sorted({s for s in data["slots"] if _valid_slot(s)})
         _write(_files()[0], data)
@@ -232,6 +234,28 @@ def add_channel(url: str) -> dict:
         data["channels"].append(channel)
         _write(_files()[0], data)
         return channel
+
+
+def add_live(url: str) -> dict:
+    from .live import channel_name
+    url = url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("colle le lien de la chaîne (twitch.tv/nom, youtube.com/@nom, kick.com/nom)")
+    with _lock:
+        data = load_settings()
+        if any(l["url"] == url for l in data["lives"]):
+            raise ValueError("live déjà suivi")
+        item = {"url": url, "name": channel_name(url), "added_at": time.time()}
+        data["lives"].append(item)
+        _write(_files()[0], data)
+        return item
+
+
+def remove_live(url: str) -> None:
+    with _lock:
+        data = load_settings()
+        data["lives"] = [l for l in data["lives"] if l["url"] != url]
+        _write(_files()[0], data)
 
 
 def remove_channel(channel_id: str) -> None:
