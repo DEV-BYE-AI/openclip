@@ -53,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("file", type=Path)
     _common_clip_args(b)
 
+    rt = sub.add_parser("retag", help="refaire les hashtags des clips déjà créés")
+    rt.add_argument("-o", "--out", type=Path, default=Path("output"))
+
     w = sub.add_parser("web", help="lancer l'interface web")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", type=int, default=8000)
@@ -78,6 +81,12 @@ def main(argv: list[str] | None = None) -> int:
             from .uploaders import youtube
             youtube.login(settings)
             print("✅ YouTube connecté")
+        return 0
+
+    if args.cmd == "retag":
+        from .pipeline import retag_all
+        n = retag_all(args.out)
+        print(f"✅ hashtags refaits pour {n} clips")
         return 0
 
     if args.cmd == "web":

@@ -103,6 +103,148 @@ def detect_language(segments: list[Segment]) -> str:
     return "fr" if fr >= en else "en"
 
 
+# mots trop vagues pour faire un hashtag (en plus de STOP)
+VAGUE = set("""
+about above across actually after again against almost along already although always among another
+anything anyway around aspect aspects basically because become before being below between beyond both
+cannot certain certainly could course different during each either else enough especially even ever
+every everything everyone example exactly fact feel feeling find follow following forward front further
+going gonna great having however huge idea impression instead itself kind kinda least less like likely
+little looking lots made make making many matter maybe mean might mind more most much must need never
+next nothing obviously often once only other otherwise part perhaps place point pretty probably quite
+rather really reason require required right same seem seems several should show since something sometimes
+soon sort start still such sure than thank thanks their them then there these thing things think those
+though thought through throughout today together toward towards under until upon used using usually
+version very want wanted watch well were whatever when where whether which while whole whose will within
+without would yeah year years your yourself literally definitely absolutely honestly completely totally
+alors après aussi autre autres avant avoir beaucoup bien bref ceci cela celle celui cependant certains
+chaque comme comment dans dedans dehors depuis déjà donc dont elle encore enfin ensemble entre être fait
+faire faut fois genre gros grand grande ici jamais juste leur lors mais même moins parce partout pendant
+peut plus plutôt pour pourquoi quand quelque rien sans selon seulement sinon sont sous souvent surtout
+tellement tout toute toutes toujours très trop truc vraiment voilà voici vous nous leurs cette avec
+review reviews video videos vidéo vidéos test official officiel trailer bande annonce episode épisode
+partie part full complet complete live stream new nouveau nouvelle fini finis finie premier première
+premiers premières dernier dernière derniers dernières vrai vraie meilleur meilleure pire seul seule
+ligne face details détails revealed leaked games jeux jeu
+""".split())
+
+_ELISION = re.compile(r"^(?:[ljdcnmst]|qu|jusqu|lorsqu|puisqu)['’]", re.I)
+
+ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9", "x": "10"}
+
+
+# noms longs connus -> forme courte utilisée sur les réseaux
+ALIASES = [(re.compile(r"grand\s+theft\s+auto", re.I), "GTA"), (re.compile(r"red\s+dead\s+redemption", re.I), "RDR"),
+           (re.compile(r"call\s+of\s+duty", re.I), "COD")]
+
+
+def _normalize(text: str) -> str:
+    for rx, short in ALIASES:
+        text = rx.sub(short, text)
+    return text
+
+
+def _tag(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", _fold(text.lower()))
+
+
+def _good_word(w: str) -> bool:
+    w = w.lower()
+    if len(w) < 4 or w in STOP or w in VAGUE or w.isdigit():
+        return False
+    # adverbes, verbes conjugués, adjectifs génériques : rarement un bon hashtag
+    if w.endswith(("ment", "ly", "ing", "ed", "ive", "ible", "able", "ous", "ary", "ful", "ait", "aient", "ez")):
+        return False
+    return not (w.endswith(("é", "ée", "és", "ées")) and not w.endswith(("té", "tés")))
+
+
+def _combos(text: str) -> list[str]:
+    """« GTA 6 », « GTA VI », « FIFA 25 », « iPhone 17 » -> gta6, fifa25, iphone17."""
+    out = []
+    pattern = r"\b([A-Za-z][A-Za-z]{1,12})[\s-]?(\d{1,2}|I{1,3}|IV|VI{0,3}|IX|X)\b"
+    for m in re.finditer(pattern, text):
+        name, num = m.group(1), m.group(2)
+        if name.lower() in STOP or name.lower() in VAGUE:
+            continue
+        before = re.findall(r"[\w'’]+", text[: m.start()])
+        if before and before[-1][:1].isupper() and _good_word(before[-1]):
+            continue  # « Super Mario BROS 3 » : on ne coupe pas un nom en plusieurs morceaux
+        roman = ROMAN.get(num.lower())
+        if roman and not name.isupper():  # « je VI » n'est pas un nom de jeu
+            continue
+        out.append(_tag(name + (roman or num)))
+    return out
+
+
+def _words(text: str) -> list[str]:
+    """Mots du texte, sans les élisions (« l'unité » -> « unité », « j'ai » -> « ai »)."""
+    return [_ELISION.sub("", w) for w in re.findall(r"[\w'’-]+|[.!?:;,()+|⭐]", text)]
+
+
+def _proper_phrases(text: str, from_title: bool = False) -> list[str]:
+    """Noms propres : mots capitalisés. Dans une phrase normale, les mots capitalisés qui se
+    suivent sont regroupés (« Vice City » -> vicecity) ; dans un titre où presque tout est en
+    majuscules, chaque mot reste seul (sinon « Walkthrough Gameplay » deviendrait un nom)."""
+    toks = _words(text)
+    letters = [t for t in toks if t[:1].isalpha()]
+    title_case = sum(t[:1].isupper() for t in letters) > 0.5 * max(1, len(letters))
+    out, run, prev = [], [], "."
+    for tok in toks + ["."]:
+        word = tok.strip("'’-")
+        cap = word[:1].isupper() and (from_title or prev not in ".!?:") and _good_word(word)
+        if cap and not title_case:
+            run.append(word)
+        else:
+            if run:
+                out.append(_tag("".join(run[:3])))
+            run = []
+            if cap:
+                out.append(_tag(word))
+        prev = tok
+    return [t for t in out if 4 <= len(t) <= 24]
+
+
+def topic_tags(title: str, limit: int = 3) -> list[str]:
+    """Hashtags du sujet de la vidéo, tirés de son titre (ex. gta6, rockstargames)."""
+    if not title:
+        return []
+    title = _normalize(title)
+    tags = _combos(title) + _proper_phrases(title, from_title=True)
+    tags += [_tag(w) for w in _words(title) if _good_word(w)]
+    seen, out = set(), []
+    for t in tags:
+        # « gta » est inutile si « gta6 » est déjà là
+        if not t or t in seen or any(t != o and o.startswith(t) for o in tags[:3]):
+            continue
+        if any(t in o or o in t for o in out):  # « criminels » déjà dans « reseauxcriminels »
+            continue
+        seen.add(t)
+        out.append(t)
+    return out[:limit]
+
+
+def clip_hashtags(text: str, ranked: list[str], topic: list[str], used: Counter, total: int = 5) -> list[str]:
+    """Hashtags d'un clip : sujet de la vidéo + ce qui est dit dans CE passage.
+
+    Les mots déjà utilisés par d'autres clips de la même vidéo sont évités, pour que chaque
+    clip ait ses propres hashtags.
+    """
+    text = _normalize(text)
+    specific = _combos(text) + _proper_phrases(text)
+    specific += [_tag(w) for w in ranked if _good_word(w)]
+    out = list(topic[:2])
+    for pass_ in (0, 1):  # 1er tour : seulement des mots pas encore pris par un autre clip
+        for t in specific:
+            if len(out) >= total:
+                break
+            if not t or t in out or any(t in o or o in t for o in out if len(o) > 3):
+                continue
+            if pass_ == 0 and used[t]:
+                continue
+            out.append(t)
+    return out[:total]
+
+
 def title_language(title: str) -> str:
     """Langue probable d'un titre court : 'fr', 'en' ou '' si on ne sait pas."""
     toks = _tokens(title)
@@ -250,8 +392,16 @@ def analyze(segments: list[Segment], *, num_clips: int, min_s: float, max_s: flo
 
     if exclude:  # passages déjà montés : on cherche d'autres moments
         candidates = [c for c in candidates if not overlaps_any(c["start"], c["end"], exclude)]
-    picked = select_best(candidates, num_clips)
-    return [Highlight(**c) for c in sorted(picked, key=lambda c: -c["score"])]
+    picked = sorted(select_best(candidates, num_clips), key=lambda c: -c["score"])
+    topic = topic_tags(title)
+    used: Counter = Counter()
+    for c in picked:
+        c["hashtags"] = clip_hashtags(c.pop("_text"), c.pop("_ranked"), topic, used)
+        used.update(c["hashtags"])
+    for c in candidates:  # libère la mémoire des autres candidats
+        c.pop("_text", None)
+        c.pop("_ranked", None)
+    return [Highlight(**c) for c in picked]
 
 
 def select_best(candidates: list[dict], k: int) -> list[dict]:
@@ -364,16 +514,7 @@ def _score_window(window: list[_SegFeat], start: float, end: float, idf: dict, v
     title = title[:1].upper() + title[1:]
     cta = "Tu en penses quoi ? 👇" if lang == "fr" else "What do you think? 👇"
     description = f"{shorten(opener, 18)} {cta}"
-    generic = ["pourtoi", "shorts"] if lang == "fr" else ["fyp", "shorts"]
-    # hashtags : plutôt des noms (on écarte adverbes et verbes conjugués : « complètement », « regardé »)
-    def tag_ok(w: str) -> bool:
-        if len(w) < 5 or w.endswith(("ment", "ly", "ing", "ed", "er", "ir")):
-            return False
-        return not (w.endswith(("é", "ée", "és", "ées")) and not w.endswith(("té", "tés")))
-
-    pool = [w for w, _ in ranked if tag_ok(w)]
-    tags = [re.sub(r"[^a-z0-9]", "", _fold(k)) for k in pool]
-    hashtags = list(dict.fromkeys(t for t in tags if t))[:3] + generic
+    hashtags: list[str] = []  # fabriqués dans analyze(), une fois les clips choisis (titre + diversité)
 
     # ---- explication
     reasons = []
@@ -406,4 +547,6 @@ def _score_window(window: list[_SegFeat], start: float, end: float, idf: dict, v
         "keywords": keywords + numbers, "hook_score": round(hook_score, 1),
         "retention_score": round(retention_score, 1), "share_score": round(share_score, 1),
         "reason": reason,
+        "_text": " ".join(f.seg.text for f in window),
+        "_ranked": [w for w, _ in ranked[:25]],
     }

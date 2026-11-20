@@ -87,3 +87,21 @@ def test_requested_count_on_long_enough_video():
     segs = build([random.choice([BLAND] + PUNCHY) for _ in range(160)])  # ~12 min
     clips = find_highlights(segs, title="t", num_clips=12, min_s=30, max_s=60)
     assert len(clips) == 12
+
+
+def test_hashtags_follow_video_and_clip():
+    from openclip.analyzer import topic_tags
+    assert topic_tags("Grand Theft Auto 6 | Official Pre-Order Trailer")[0] == "gta6"
+    assert topic_tags("GTA VI Walkthrough Gameplay Part 1")[0] == "gta6"
+    parts = [
+        "Lucia and Jason drive through Vice City in a Porsche and the airboat in Leonida is wild.",
+        "Personne ne te dit ça mais le secret pour gagner 10000 euros ?",
+        "The police chase near the Keys with helicopters everywhere is crazy.",
+        "Tu dois comprendre une erreur que tout le monde fait au début.",
+    ]
+    segs = build([BLAND] * 4 + parts * 6 + [BLAND] * 4 + [p.replace("Vice City", "Miami") for p in parts] * 6 + [BLAND] * 4)
+    clips = analyze(segs, num_clips=3, min_s=30, max_s=60, title="GTA 6 Review")
+    tags = [c.hashtags for c in clips]
+    assert all(t[0] == "gta6" for t in tags)
+    assert all("fyp" not in t and "shorts" not in t and "pourtoi" not in t for t in tags)
+    assert len({tuple(t[1:]) for t in tags}) == len(tags)  # chaque clip a ses propres hashtags

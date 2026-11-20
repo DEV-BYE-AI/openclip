@@ -308,3 +308,30 @@ def publish(clip_dir: Path, settings: Settings, targets: list[str], *,
                 log.info("📤 %s -> %s : %s", clip["file"], target, res)
             except Exception as exc:
                 log.error("❌ %s -> %s : %s", clip["file"], target, exc)
+
+
+def retag_all(out_root: Path) -> int:
+    """Recalcule les hashtags de tous les clips existants (sujet de la vidéo + contenu du clip)."""
+    from collections import Counter
+
+    from .analyzer import STOP, _tokens, clip_hashtags, topic_tags
+
+    count = 0
+    for f in sorted(out_root.glob("*/clips.json")):
+        manifest = json.loads(f.read_text())
+        src = manifest.get("source", {})
+        path = Path(src.get("transcript", ""))
+        if not path.exists():
+            continue
+        segments = load_transcript(path)
+        topic = topic_tags(src.get("title", ""))
+        used: Counter = Counter()
+        for clip in sorted(manifest["clips"], key=lambda c: -c.get("score", 0)):
+            words = words_between(segments, clip["start"], clip["end"])
+            text = " ".join(w.text for w in words)
+            freq = Counter(t for t in _tokens(text) if t not in STOP and len(t) > 3)
+            clip["hashtags"] = clip_hashtags(text, [w for w, _ in freq.most_common(25)], topic, used)
+            used.update(clip["hashtags"])
+            count += 1
+        _save(f.parent, manifest)
+    return count
