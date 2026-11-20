@@ -410,6 +410,13 @@ class Scheduler:
                 log.exception("automatisation")
 
     def tick(self, now: datetime | None = None) -> None:
+        if time.time() - getattr(self, "_last_cleanup", 0) > 3600:
+            self._last_cleanup = time.time()
+            try:
+                from .pipeline import cleanup_sources
+                cleanup_sources(self.out_root)
+            except Exception:
+                log.exception("nettoyage du disque")
         active = 0
         for profile in list_profiles():
             with use_profile(profile["id"]):

@@ -335,3 +335,39 @@ def retag_all(out_root: Path) -> int:
             count += 1
         _save(f.parent, manifest)
     return count
+
+
+def cleanup_sources(out_root: Path, keep_days: float = 7, min_free_gb: float = 4,
+                    target_free_gb: float = 6) -> list[Path]:
+    """Libère de la place : supprime les vidéos sources (téléchargements, lives, envois)
+    de plus de `keep_days` jours, puis les plus anciennes tant que le disque a moins de
+    `min_free_gb` Go libres. Les clips montés ne sont jamais supprimés (seulement la vidéo
+    d'origine : « D'autres clips » ne sera plus possible pour ces projets).
+    """
+    import shutil
+
+    src = out_root / "_sources"
+    if not src.exists():
+        return []
+    videos = sorted((f for f in src.rglob("*") if f.is_file()
+                     and f.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".part"}),
+                    key=lambda f: f.stat().st_mtime)
+    removed: list[Path] = []
+    limit = time.time() - keep_days * 86400
+    for f in list(videos):
+        if f.stat().st_mtime < limit:
+            f.unlink(missing_ok=True)
+            removed.append(f)
+            videos.remove(f)
+    free = lambda: shutil.disk_usage(out_root).free / 1e9  # noqa: E731
+    if free() < min_free_gb:
+        recent = time.time() - 3 * 3600  # jamais une vidéo en cours de traitement (< 3 h)
+        for f in videos:
+            if free() >= target_free_gb:
+                break
+            if f.stat().st_mtime < recent:
+                f.unlink(missing_ok=True)
+                removed.append(f)
+    if removed:
+        log.info("nettoyage : %d vidéo(s) source supprimée(s)", len(removed))
+    return removed

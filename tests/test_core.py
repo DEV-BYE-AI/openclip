@@ -103,3 +103,24 @@ def test_no_facecam_on_plain_video(tmp_path: Path):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15",
                     "-t", "3", str(src)], check=True)
     assert detect_facecam(src, 0, 3) is None
+
+
+def test_cleanup_sources(tmp_path: Path, monkeypatch):
+    import os
+    import shutil
+    import time
+
+    from openclip.pipeline import cleanup_sources
+    src = tmp_path / "_sources"
+    (src / "live").mkdir(parents=True)
+    old, new, keep = src / "old.mp4", src / "live" / "new.mp4", src / "old.transcript.json"
+    for f in (old, new, keep):
+        f.write_bytes(b"x" * 10)
+    os.utime(old, (time.time() - 10 * 86400,) * 2)
+    removed = cleanup_sources(tmp_path, keep_days=7, min_free_gb=0)
+    assert removed == [old] and new.exists() and keep.exists()
+    # disque presque plein : les plus anciennes partent, sauf celles de moins de 3 h
+    os.utime(new, (time.time() - 5 * 3600,) * 2)
+    usage = shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage._replace(free=0))
+    assert cleanup_sources(tmp_path, keep_days=30, min_free_gb=4) == [new]
