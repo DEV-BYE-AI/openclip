@@ -7,7 +7,14 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
 # .env du dossier courant d'abord, sinon celui à la racine du projet
-load_dotenv(find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent / ".env")
+# OPENCLIP_ENV_FILE : fichier de réglages propre à un espace (ex. un 2e utilisateur sur le même
+# serveur). Dans ce cas, le .env principal n'est PAS lu, pour ne partager aucune clé.
+_ENV_FILE = os.environ.get("OPENCLIP_ENV_FILE")
+if _ENV_FILE:
+    if Path(_ENV_FILE).is_file():
+        load_dotenv(_ENV_FILE)
+else:
+    load_dotenv(find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent / ".env")
 
 HOME_DIR = Path(os.environ.get("OPENCLIP_HOME", Path.home() / ".openclip"))
 TOKENS_DIR = HOME_DIR / "tokens"

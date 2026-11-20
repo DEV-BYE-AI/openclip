@@ -158,6 +158,18 @@ C'est prêt : l'analyse locale fonctionne sans clé. (Optionnel : `ANTHROPIC_API
   transcription locale (fichiers envoyés, vidéos sans sous-titres) : `WHISPER_MODEL=base` ou `tiny`
   dans `.env` (plus rapide, un peu moins précis).
 
+## Donner OpenClip à quelqu'un d'autre (espace séparé)
+
+```bash
+sudo bash deploy/add-user.sh cousin          # crée l'espace, affiche l'adresse et le mot de passe
+sudo bash deploy/add-user.sh cousin --remove # le supprime (ses données restent sur le disque)
+```
+
+Chaque espace a son propre service, son adresse (https://cousin.<ip>.sslip.io avec Caddy), son
+mot de passe, ses projets, ses comptes TikTok/YouTube/Upload-Post et son mode automatique : personne
+ne voit ce que fait l'autre. Le `.env` principal n'est pas lu par les autres espaces. Les espaces se
+partagent le processeur du serveur. Mise à jour de tous : `git pull && sudo systemctl restart 'openclip*'`.
+
 ## Mode automatique (onglet « Auto »)
 
 - **Chaînes suivies** : colle le lien d'une chaîne YouTube ; toutes les 20 minutes OpenClip vérifie son
