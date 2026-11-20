@@ -42,10 +42,14 @@ def channel_name(url: str) -> str:
 
 
 def _ydl_opts() -> dict:
+    import os
+
     from .download import cookies_path
 
+    # LIVE_MAX_HEIGHT=1080 : caméra plus nette, mais ~2x plus d'espace disque par morceau
+    h = int(os.environ.get("LIVE_MAX_HEIGHT", "720"))
     opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
-            "format": "best[height<=720][protocol^=m3u8]/best[height<=720]/best"}
+            "format": f"best[height<={h}][protocol^=m3u8]/best[height<={h}]/best"}
     deno = shutil.which("deno") or str(Path(sys.executable).with_name("deno"))
     if Path(deno).exists():
         opts["js_runtimes"] = {"deno": {"path": deno}}

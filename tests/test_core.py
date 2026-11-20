@@ -90,7 +90,7 @@ def test_stream_layout_graph():
     vf = build_graph(1920, 1080, "stream", 0.5, 1080, 1920, None, cam=(0, 600, 400, 300), audio=False,
                      progress_bar=False)
     assert "vstack=inputs=2" in vf and "split=2[c][g]" in vf
-    top = int(vf.split("scale=1080:")[1].split(",")[0])
+    top = int(vf.split("scale=1080:")[1].split(":")[0].split(",")[0])
     assert 0.28 * 1920 <= top <= 0.42 * 1920
     # la partie jeu évite la caméra (à gauche) : elle commence après x=400
     gx = int(vf.split("[g]crop=")[1].split(":")[2])
@@ -124,3 +124,9 @@ def test_cleanup_sources(tmp_path: Path, monkeypatch):
     usage = shutil.disk_usage(tmp_path)
     monkeypatch.setattr(shutil, "disk_usage", lambda p: usage._replace(free=0))
     assert cleanup_sources(tmp_path, keep_days=30, min_free_gb=4) == [new]
+
+
+def test_enhance_scales_with_zoom():
+    from openclip.render import enhance
+    assert "unsharp" not in enhance(1080, 1920, 1080, 1920)
+    assert "hqdn3d=2.5" in enhance(1080, 806, 350, 262) and "lanczos" in enhance(1080, 806, 350, 262)

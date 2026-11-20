@@ -19,13 +19,24 @@ class SourceVideo:
     uploader: str = ""
 
 
+def _format() -> str:
+    """Qualité de la vidéo source. SOURCE_MAX_HEIGHT=1440 (ou 2160) donne une caméra de streamer
+    bien plus nette dans les clips « caméra + jeu », au prix de fichiers ~2x plus lourds et
+    d'un montage plus lent. Par défaut 1080 : H.264 privilégié (rapide à décoder)."""
+    h = int(os.environ.get("SOURCE_MAX_HEIGHT", "1080"))
+    if h <= 1080:
+        return (f"bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}][ext=mp4]+ba[ext=m4a]"
+                f"/bv*[height<={h}]+ba/b[height<={h}]/b")
+    # au-delà de 1080p, YouTube ne propose que VP9/AV1 : on prend la meilleure définition
+    return f"bv*[height<={h}]+ba/b[height<={h}]/b"
+
+
 def download(url: str, out_dir: Path) -> SourceVideo:
     out_dir.mkdir(parents=True, exist_ok=True)
     opts = {
         # 1080p max, mp4 de préférence (plus rapide à ré-encoder)
         # H.264 (avc1) en priorité : bien plus rapide à décoder que l'AV1 ou le VP9 sur un petit serveur
-        "format": ("bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]"
-                   "/bv*[height<=1080]+ba/b[height<=1080]/b"),
+        "format": _format(),
         "merge_output_format": "mp4",
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
         "noplaylist": True,

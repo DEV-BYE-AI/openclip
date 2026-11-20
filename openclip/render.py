@@ -181,6 +181,24 @@ def detect_facecam(path: Path, start: float, end: float, samples: int = 14):
     return (x, y, bw // 2 * 2, bh // 2 * 2)
 
 
+def enhance(out_w: int, out_h: int, src_w: int, src_h: int) -> str:
+    """Agrandissement de meilleure qualité (filtres ffmpeg, rapides sur CPU).
+
+    Plus l'image est agrandie (petite caméra de streamer), plus on nettoie les blocs de
+    compression avant et plus on redonne du piqué après :
+    hqdn3d (débruitage léger) -> lanczos (agrandissement net) -> unsharp (netteté)
+    -> eq (un peu de contraste et de couleurs).
+    """
+    factor = max(out_w / max(src_w, 1), out_h / max(src_h, 1))
+    if factor <= 1.05:
+        return f"scale={out_w}:{out_h}:flags=lanczos"
+    strong = factor >= 2.2
+    denoise = "hqdn3d=2.5:2:5:4," if strong else "hqdn3d=1:1:3:3,"
+    sharp = "unsharp=5:5:1.1:5:5:0.0" if strong else "unsharp=5:5:0.6:5:5:0.0"
+    color = ",eq=contrast=1.05:saturation=1.1" if strong else ""
+    return f"{denoise}scale={out_w}:{out_h}:flags=lanczos,{sharp}{color}"
+
+
 def has_audio(path: Path) -> bool:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
@@ -268,8 +286,8 @@ def build_graph(src_w: int, src_h: int, mode: str, center_x: float | None, out_w
                 gx = min(cam[0] - gw, gx)
         chains.append(
             f"[vc]split=2[c][g];"
-            f"[c]crop={cw}:{ch}:{x}:{y},scale={out_w}:{top_h},setsar=1[top];"
-            f"[g]crop={gw}:{src_h}:{gx}:0,scale={out_w}:{bot_h},setsar=1[bot];"
+            f"[c]crop={cw}:{ch}:{x}:{y},{enhance(out_w, top_h, cw, ch)},setsar=1[top];"
+            f"[g]crop={gw}:{src_h}:{gx}:0,{enhance(out_w, bot_h, gw, src_h)},setsar=1[bot];"
             f"[top][bot]vstack=inputs=2,setsar=1[vf]"
         )
     elif mode == "blur":
@@ -285,7 +303,7 @@ def build_graph(src_w: int, src_h: int, mode: str, center_x: float | None, out_w
         crop_w = min(src_w, int(src_h * out_w / out_h) // 2 * 2)
         cx = center_x if center_x is not None else 0.5
         x = int(min(max(cx * src_w - crop_w / 2, 0), src_w - crop_w))
-        chains.append(f"[vc]crop={crop_w}:{src_h}:{x}:0,scale={out_w}:{out_h},setsar=1[vf]")
+        chains.append(f"[vc]crop={crop_w}:{src_h}:{x}:0,{enhance(out_w, out_h, crop_w, src_h)},setsar=1[vf]")
 
     last = "vf"
     if ass:
