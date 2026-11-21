@@ -585,14 +585,14 @@ async function renderAuto() {
     </div>
     <div class="account" style="margin-bottom:18px">
       <h3>${esc(prof.name)} <span class="status ${a.tiktok_own ? "ok" : ""}">${a.tiktok_own ? "TikTok connecté" : a.tiktok_via_upload_post ? "TikTok via Upload-Post" : "TikTok non connecté"}</span></h3>
-      ${!a.tiktok_own && a.tiktok_via_upload_post ? `<div class="note" style="color:var(--amber)">TikTok passe par Upload-Post, dont le forfait gratuit refuse TikTok. Décoche TikTok dans Comptes → Upload-Post pour utiliser ta propre app TikTok.</div>` : ""}
+      ${!a.tiktok_own && a.tiktok_via_upload_post ? `<div class="note">TikTok et YouTube sont publiés par <b>Upload-Post</b>. Indique ci-dessous le nom du profil Upload-Post de ce compte${a.upload_post_user ? "" : ` <b style="color:var(--amber)">(à remplir, sinon le profil principal est utilisé)</b>`}.</div>` : ""}
       <div class="muted" style="font-size:13px">Chaque compte a ses propres sources, réglages, heures et file d'attente. Les clips de ce compte sont publiés sur <b>son</b> compte TikTok.</div>
       <div class="chips">
-        <button class="btn btn-sm btn-tiktok" id="profile-tiktok">${prof.tiktok ? "Reconnecter" : "Connecter"} le TikTok de ce compte</button>
+        ${a.tiktok_via_upload_post && !a.tiktok_own ? "" : `<button class="btn btn-sm btn-tiktok" id="profile-tiktok">${prof.tiktok ? "Reconnecter" : "Connecter"} le TikTok de ce compte</button>`}
         <button class="btn btn-sm btn-ghost" id="profile-rename">Renommer</button>
         ${pid !== "main" ? `<button class="btn btn-sm btn-ghost" id="profile-del" style="color:var(--danger)">Supprimer ce compte</button>` : ""}
       </div>
-      <div class="note">Avant de connecter : ouvre l'app TikTok et passe sur le bon compte (ou déconnecte-toi de tiktok.com dans le navigateur), puis touche le bouton et autorise. Avec ta propre app TikTok en Sandbox, ajoute chaque compte dans « Target users ».</div>
+      <div class="note" ${a.tiktok_via_upload_post && !a.tiktok_own ? "hidden" : ""}>Avant de connecter : ouvre l'app TikTok et passe sur le bon compte (ou déconnecte-toi de tiktok.com dans le navigateur), puis touche le bouton et autorise. Avec ta propre app TikTok en Sandbox, ajoute chaque compte dans « Target users ».</div>
       <label class="ed" style="padding:0;margin-top:6px">Profil Upload-Post de ce compte (optionnel)<input id="profile-up" value="${esc(a.upload_post_user || "")}" placeholder="ex. @inspecteurnews"></label>
     </div>
     <div class="proj-head">
@@ -694,7 +694,7 @@ async function renderAuto() {
     if (!confirm(`Supprimer le compte « ${prof.name} », ses réglages et sa file d'attente ? (les projets restent)`)) return;
     await api(`/api/profiles/${encodeURIComponent(pid)}`, { method: "DELETE" }); setProfile("main"); renderAuto();
   };
-  $("#profile-tiktok").onclick = async () => {
+  if ($("#profile-tiktok")) $("#profile-tiktok").onclick = async () => {
     try {
       const r = await api(`/api/connect/tiktok?direct=true&profile=${encodeURIComponent(pid)}`, { method: "POST" });
       location.href = r.url;
