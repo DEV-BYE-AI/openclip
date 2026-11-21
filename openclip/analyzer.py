@@ -126,6 +126,8 @@ review reviews video videos vidéo vidéos test official officiel trailer bande 
 partie part full complet complete live stream new nouveau nouvelle fini finis finie premier première
 premiers premières dernier dernière derniers dernières vrai vraie meilleur meilleure pire seul seule
 ligne face details détails revealed leaked games jeux jeu
+please stay guys okay alright bro bruh dude hello hey man yeah wait look come stop chat chatter
+merci salut mec frère wesh allez attends regarde viens
 """.split())
 
 _ELISION = re.compile(r"^(?:[ljdcnmst]|qu|jusqu|lorsqu|puisqu)['’]", re.I)
@@ -142,6 +144,18 @@ def _normalize(text: str) -> str:
     for rx, short in ALIASES:
         text = rx.sub(short, text)
     return text
+
+
+def _looks_like_word(tag: str) -> bool:
+    """Écarte le charabia (pseudos, codes : « oielbmyrarq ») : trop de consonnes d'affilée,
+    ou une lettre répétée 3 fois."""
+    if not tag or tag.isdigit():
+        return False
+    letters = re.sub(r"\d", "", tag)
+    if re.search(r"[bcdfghjklmnpqrstvwxyz]{4,}", letters) or re.search(r"(.)\1\1", letters):
+        return False
+    vowels = sum(c in "aeiouy" for c in letters)
+    return len(letters) < 6 or 0.25 <= vowels / len(letters) <= 0.7
 
 
 def _tag(text: str) -> str:
@@ -214,7 +228,7 @@ def topic_tags(title: str, limit: int = 3) -> list[str]:
     seen, out = set(), []
     for t in tags:
         # « gta » est inutile si « gta6 » est déjà là
-        if not t or t in seen or any(t != o and o.startswith(t) for o in tags[:3]):
+        if not t or t in seen or not _looks_like_word(t) or any(t != o and o.startswith(t) for o in tags[:3]):
             continue
         if any(t in o or o in t for o in out):  # « criminels » déjà dans « reseauxcriminels »
             continue
@@ -237,7 +251,7 @@ def clip_hashtags(text: str, ranked: list[str], topic: list[str], used: Counter,
         for t in specific:
             if len(out) >= total:
                 break
-            if not t or t in out or any(t in o or o in t for o in out if len(o) > 3):
+            if not t or t in out or not _looks_like_word(t) or any(t in o or o in t for o in out if len(o) > 3):
                 continue
             if pass_ == 0 and used[t]:
                 continue

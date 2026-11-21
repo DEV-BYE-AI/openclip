@@ -105,3 +105,13 @@ def test_hashtags_follow_video_and_clip():
     assert all(t[0] == "gta6" for t in tags)
     assert all("fyp" not in t and "shorts" not in t and "pourtoi" not in t for t in tags)
     assert len({tuple(t[1:]) for t in tags}) == len(tags)  # chaque clip a ses propres hashtags
+
+
+def test_hashtags_skip_gibberish_and_filler():
+    from collections import Counter
+
+    from openclip.analyzer import clip_hashtags
+    tags = clip_hashtags("please stay guys, the heist in Vice City with Lucia", ["please", "stay", "guys", "heist"],
+                         ["gta6"], Counter())
+    assert "please" not in tags and "guys" not in tags and "vicecity" in tags
+    assert "oielbmyrarq" not in clip_hashtags("oielbmyrarq oielbmyrarq", ["oielbmyrarq"], [], Counter())
