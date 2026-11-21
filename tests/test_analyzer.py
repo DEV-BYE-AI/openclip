@@ -114,4 +114,7 @@ def test_hashtags_skip_gibberish_and_filler():
     tags = clip_hashtags("please stay guys, the heist in Vice City with Lucia", ["please", "stay", "guys", "heist"],
                          ["gta6"], Counter())
     assert "please" not in tags and "guys" not in tags and "vicecity" in tags
-    assert "oielbmyrarq" not in clip_hashtags("oielbmyrarq oielbmyrarq", ["oielbmyrarq"], [], Counter())
+    from openclip.analyzer import spoken_tags, topic_tags
+    # mot du titre jamais prononcé (pseudo, code) : écarté ; « nom + numéro » toujours gardé
+    sp = spoken_tags("rockstar did it again in vice city")
+    assert topic_tags("GTA 6 oielbmyrarq ROCKSTAR", spoken=sp) == ["gta6", "rockstar"]

@@ -324,7 +324,8 @@ def retag_all(out_root: Path) -> int:
         if not path.exists():
             continue
         segments = load_transcript(path)
-        topic = topic_tags(src.get("title", ""))
+        from .analyzer import spoken_tags
+        topic = topic_tags(src.get("title", ""), spoken=spoken_tags(" ".join(x.text for x in segments)))
         used: Counter = Counter()
         for clip in sorted(manifest["clips"], key=lambda c: -c.get("score", 0)):
             words = words_between(segments, clip["start"], clip["end"])

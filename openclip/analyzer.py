@@ -152,7 +152,7 @@ def _looks_like_word(tag: str) -> bool:
     if not tag or tag.isdigit():
         return False
     letters = re.sub(r"\d", "", tag)
-    if re.search(r"[bcdfghjklmnpqrstvwxz]{4,}|[bcdfghjklmnpqrstvwxyz]{5,}", letters) or re.search(r"(.)\1\1", letters):
+    if re.search(r"[bcdfghjklmnpqrstvwxz]{6,}", letters) or re.search(r"(.)\1\1", letters):
         return False
     vowels = sum(c in "aeiouy" for c in letters)
     return len(letters) < 6 or 0.25 <= vowels / len(letters) <= 0.7
@@ -218,13 +218,27 @@ def _proper_phrases(text: str, from_title: bool = False) -> list[str]:
     return [t for t in out if 4 <= len(t) <= 24]
 
 
-def topic_tags(title: str, limit: int = 3) -> list[str]:
-    """Hashtags du sujet de la vidéo, tirés de son titre (ex. gta6, rockstargames)."""
+def spoken_tags(text: str) -> set[str]:
+    """Mots (et paires de mots) prononcés dans la vidéo, sous forme de hashtag."""
+    toks = [_tag(w) for w in _words(_normalize(text))]
+    toks = [t for t in toks if t]
+    return set(toks) | {a + b for a, b in zip(toks, toks[1:])}
+
+
+def topic_tags(title: str, limit: int = 3, spoken: set[str] | None = None) -> list[str]:
+    """Hashtags du sujet de la vidéo, tirés de son titre (ex. gta6, rockstargames).
+
+    Avec `spoken`, un mot du titre n'est gardé que s'il est aussi prononcé dans la vidéo
+    (sauf « nom + numéro » comme gta6) : cela écarte pseudos, codes et mots de racolage.
+    """
     if not title:
         return []
     title = _normalize(title)
-    tags = _combos(title) + _proper_phrases(title, from_title=True)
-    tags += [_tag(w) for w in _words(title) if _good_word(w)]
+    combos = _combos(title)
+    others = _proper_phrases(title, from_title=True) + [_tag(w) for w in _words(title) if _good_word(w)]
+    if spoken is not None:
+        others = [t for t in others if t in spoken]
+    tags = combos + others
     seen, out = set(), []
     for t in tags:
         # « gta » est inutile si « gta6 » est déjà là
@@ -407,7 +421,7 @@ def analyze(segments: list[Segment], *, num_clips: int, min_s: float, max_s: flo
     if exclude:  # passages déjà montés : on cherche d'autres moments
         candidates = [c for c in candidates if not overlaps_any(c["start"], c["end"], exclude)]
     picked = sorted(select_best(candidates, num_clips), key=lambda c: -c["score"])
-    topic = topic_tags(title)
+    topic = topic_tags(title, spoken=spoken_tags(" ".join(s.text for s in segs)))
     used: Counter = Counter()
     for c in picked:
         c["hashtags"] = clip_hashtags(c.pop("_text"), c.pop("_ranked"), topic, used)
