@@ -547,7 +547,7 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         def on_done(project_dir):
             try:
                 if project_dir:
-                    automation._enqueue_for(profile_id, project_dir, min_score)
+                    automation._enqueue_for(profile_id, project_dir, min_score, priority=True)
             finally:
                 if finished:
                     finished()

@@ -661,7 +661,13 @@ async function renderAuto() {
           <label class="switch"><input type="checkbox" data-target="tiktok" ${a.targets.includes("tiktok") ? "checked" : ""}> TikTok</label>
           <label class="switch"><input type="checkbox" data-target="youtube" ${a.targets.includes("youtube") ? "checked" : ""}> YouTube Shorts</label>
         </div></div>
-      <div class="opt-wide"><div class="opt-label">Heures de publication (${esc(a.timezone)})</div>
+      <div class="opt-wide"><div class="opt-label">Rythme de publication</div>
+        ${chips("publish_every_minutes", [[0, "Heures fixes"], [60, "Toutes les heures"], [120, "Toutes les 2 h"], [180, "Toutes les 3 h"]], a.publish_every_minutes || 0)}
+        ${a.publish_every_minutes ? `<div class="opt-label" style="margin-top:12px">Entre</div>${chips("active_hours", [["8,23", "8 h – 23 h"], ["9,24", "9 h – minuit"], ["0,24", "24 h/24"]], (a.active_hours || [9, 23]).join(","))}
+          <div class="tip">${a.active_hours && a.active_hours[0] === 0 ? "⚠️ 24 publications par jour par compte : TikTok peut y voir du spam et réduire la portée." : "Une publication par créneau : le meilleur clip en attente (les clips de live passent en premier)."}</div>` : ""}
+        <div class="switches" style="margin-top:10px"><label class="switch"><input type="checkbox" id="live-prio" ${a.live_priority !== false ? "checked" : ""}> 🔴 Clips de live en priorité</label></div>
+      </div>
+      <div class="opt-wide" ${a.publish_every_minutes ? "hidden" : ""}><div class="opt-label">Heures de publication (${esc(a.timezone)})</div>
         <div class="chips">${a.slots.map((s) => `<button type="button" class="chip" aria-pressed="true" data-slot="${s}">${s} ✕</button>`).join("")}
           <input type="time" id="slot-new" class="chip" style="color:var(--text)"><button type="button" class="btn btn-sm" id="slot-add">Ajouter</button></div>
         <div class="tip">À chaque heure, le meilleur clip en attente est publié. 1 à 3 publications par jour, c'est l'idéal.</div></div>
@@ -702,10 +708,12 @@ async function renderAuto() {
   };
   $("#profile-up").onchange = (e) => save({ upload_post_user: e.target.value.trim() });
   $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
+  $("#live-prio").onchange = (e) => save({ live_priority: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]"); if (!b) return;
-    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day", "live_chunk_minutes"].includes(g.dataset.group);
-    save({ [g.dataset.group]: num ? Number(b.dataset.v) : b.dataset.v });
+    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day", "live_chunk_minutes", "publish_every_minutes"].includes(g.dataset.group);
+    const val = g.dataset.group === "active_hours" ? b.dataset.v.split(",").map(Number) : num ? Number(b.dataset.v) : b.dataset.v;
+    save({ [g.dataset.group]: val });
   }));
   view.querySelectorAll("[data-target]").forEach((c) => (c.onchange = () => save({ targets: [...view.querySelectorAll("[data-target]:checked")].map((x) => x.dataset.target) })));
   view.querySelectorAll("[data-slot]").forEach((b) => (b.onclick = () => save({ slots: a.slots.filter((s) => s !== b.dataset.slot) })));

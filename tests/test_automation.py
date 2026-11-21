@@ -156,3 +156,19 @@ def test_no_targets_keeps_queue(home):
     calls = []
     auto.Scheduler(lambda *a: None, lambda *a: calls.append(a), out).tick(datetime(2026, 1, 1, 12, 5))
     assert calls == [] and auto.load_queue()[0]["status"] == "pending"
+
+
+def test_hourly_publishing_and_live_priority(home):
+    out = home / "out"
+    auto.save_settings({"enabled": True, "publish_every_minutes": 60, "active_hours": [9, 23],
+                        "targets": ["tiktok"]})
+    auto.enqueue_project(project(out, "video", [95]), 0)
+    auto.enqueue_project(project(out, "live", [70]), 0, priority=True)
+    published = []
+    sch = auto.Scheduler(lambda *a: None, lambda d, i, t: published.append(d.name) or {"ok": 1}, out)
+    sch.tick(datetime(2026, 11, 21, 7, 0))      # avant 9 h : rien
+    assert published == []
+    sch.tick(datetime(2026, 11, 21, 10, 0))     # clip de live d'abord, malgré un score plus bas
+    sch.tick(datetime(2026, 11, 21, 10, 30))    # moins d'une heure après : rien
+    sch.tick(datetime(2026, 11, 21, 11, 0))
+    assert published == ["live", "video"]

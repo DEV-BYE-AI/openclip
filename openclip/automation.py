@@ -44,6 +44,9 @@ DEFAULTS = {
     "upload_post_user": "",       # profil Upload-Post de ce compte (si publication via Upload-Post)
     "lives": [],                  # chaînes dont on clippe les lives : [{url, name, added_at}]
     "live_chunk_minutes": 30,     # durée des morceaux enregistrés pendant un live
+    "publish_every_minutes": 0,   # 0 = aux heures fixes (slots) ; 60 = une publication par heure
+    "active_hours": [9, 23],      # publication à intervalle seulement entre ces heures (heure locale)
+    "live_priority": True,        # les clips des lives passent devant le reste de la file
 }
 # filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
 SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
@@ -326,7 +329,7 @@ def pick_trending(videos: list[dict], seen: set, min_views: int, max_minutes: fl
 
 # --------------------------------------------------------------------------- file d'attente
 
-def enqueue_project(project_dir: Path, min_score: float) -> int:
+def enqueue_project(project_dir: Path, min_score: float, priority: bool = False) -> int:
     manifest = json.loads((project_dir / "clips.json").read_text())
     with _lock:
         queue = load_queue()
@@ -337,21 +340,27 @@ def enqueue_project(project_dir: Path, min_score: float) -> int:
                 continue
             queue.append({"project": project_dir.name, "clip": i, "title": clip["title"],
                           "score": clip.get("score", 0), "status": "pending", "added_at": time.time(),
-                          "source": manifest["source"].get("title", "")})
+                          "source": manifest["source"].get("title", ""), "priority": bool(priority)})
             added += 1
         _save_queue(queue)
     return added
 
 
-def _enqueue_for(pid: str, project_dir: Path, min_score: float) -> int:
+def _enqueue_for(pid: str, project_dir: Path, min_score: float, priority: bool = False) -> int:
     """Appelé quand les clips sont prêts (dans un autre fil) : file d'attente du bon compte."""
     with use_profile(pid):
-        return enqueue_project(project_dir, min_score)
+        return enqueue_project(project_dir, min_score, priority=priority)
 
 
 def next_pending() -> dict | None:
     pending = [q for q in load_queue() if q["status"] == "pending"]
-    return max(pending, key=lambda q: (q["score"], -q["added_at"])) if pending else None
+    if not pending:
+        return None
+    live_first = load_settings().get("live_priority", True)
+    # clips de live d'abord (les plus récents : c'est l'actualité), sinon le meilleur score
+    return max(pending, key=lambda q: (bool(live_first and q.get("priority")),
+                                       q["added_at"] if live_first and q.get("priority") else 0,
+                                       q["score"], -q["added_at"]))
 
 
 def mark(item: dict, **changes) -> None:
@@ -441,6 +450,15 @@ class Scheduler:
 
         when = now or datetime.now(ZoneInfo(cfg["timezone"]))
         path = _state_file()
+        every = int(cfg.get("publish_every_minutes") or 0)
+        if every > 0:
+            start, end = (cfg.get("active_hours") or [0, 24])[:2]
+            last = float(_read(path, {}).get("last_publish_at", 0))
+            if start <= when.hour < end and when.timestamp() - last >= every * 60 - 30:
+                with _lock:
+                    _write(path, {**_read(path, {}), "last_publish_at": when.timestamp()})
+                self.publish_next(cfg)
+            return 1
         key = due_slot(when, cfg["slots"], _read(path, {}).get("last_slot"))
         if key:
             with _lock:
