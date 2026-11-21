@@ -172,3 +172,15 @@ def test_hourly_publishing_and_live_priority(home):
     sch.tick(datetime(2026, 11, 21, 10, 30))    # moins d'une heure après : rien
     sch.tick(datetime(2026, 11, 21, 11, 0))
     assert published == ["live", "video"]
+
+
+def test_tiktok_daily_cap(home):
+    import time as _t
+    out = home / "out"
+    auto.save_settings({"enabled": True, "targets": ["tiktok", "youtube"], "tiktok_daily_max": 2})
+    auto.enqueue_project(project(out, "p", [90, 80, 70]), 0)
+    sent = []
+    sch = auto.Scheduler(lambda *a: None, lambda d, i, t: sent.append(t) or {"ok": 1}, out)
+    for _ in range(3):
+        sch.publish_next()
+    assert sent.count("tiktok") == 2 and sent.count("youtube") == 3

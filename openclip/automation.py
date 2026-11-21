@@ -47,6 +47,7 @@ DEFAULTS = {
     "publish_every_minutes": 0,   # 0 = aux heures fixes (slots) ; 60 = une publication par heure
     "active_hours": [9, 23],      # publication à intervalle seulement entre ces heures (heure locale)
     "live_priority": True,        # les clips des lives passent devant le reste de la file
+    "tiktok_daily_max": 12,       # TikTok refuse au-delà de 15 publications par 24 h et par compte
 }
 # filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
 SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
@@ -560,15 +561,29 @@ class Scheduler:
         if not item:
             log.info("[publication %s] file d'attente vide : rien à publier", who)
             return None
-        log.info("[publication %s] envoi de « %s » vers %s", who, item["title"][:60], ", ".join(cfg["targets"]))
+        targets = list(cfg["targets"])
+        if "tiktok" in targets:
+            day_ago = time.time() - 86400
+            sent = sum(1 for q in load_queue() if (q.get("published_at") or 0) > day_ago
+                       and "tiktok" in (q.get("results") or {}))
+            if sent >= int(cfg.get("tiktok_daily_max", 12)):
+                log.info("[publication %s] TikTok : %d publications en 24 h (max %s), TikTok sauté pour ce clip",
+                         who, sent, cfg.get("tiktok_daily_max", 12))
+                targets.remove("tiktok")
+        if not targets:
+            return None
+        log.info("[publication %s] envoi de « %s » vers %s", who, item["title"][:60], ", ".join(targets))
         results, errors = {}, {}
-        for target in cfg["targets"]:
+        for target in targets:
             try:
                 results[target] = self.publish(self.out_root / item["project"], item["clip"], target)
                 log.info("[publication %s] %s : OK", who, target)
             except Exception as exc:
                 errors[target] = str(exc)
-                log.warning("[publication %s] %s : ÉCHEC — %s", who, target, exc)
+                if "daily posting cap" in str(exc).lower() or "daily_cap" in str(exc).lower():
+                    log.warning("[publication %s] %s : limite quotidienne de la plateforme atteinte", who, target)
+                else:
+                    log.warning("[publication %s] %s : ÉCHEC — %s", who, target, exc)
         # erreur de réglage (profil/clé) : le clip n'y est pour rien, il reste en attente
         config_error = not results and errors and all(
             any(k in e.lower() for k in ("not associated", "clé api", "api key", "non connecté", "manquant"))

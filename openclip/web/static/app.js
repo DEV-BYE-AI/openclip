@@ -665,6 +665,9 @@ async function renderAuto() {
         ${chips("publish_every_minutes", [[0, "Heures fixes"], [60, "Toutes les heures"], [120, "Toutes les 2 h"], [180, "Toutes les 3 h"]], a.publish_every_minutes || 0)}
         ${a.publish_every_minutes ? `<div class="opt-label" style="margin-top:12px">Entre</div>${chips("active_hours", [["8,23", "8 h – 23 h"], ["9,24", "9 h – minuit"], ["0,24", "24 h/24"]], (a.active_hours || [9, 23]).join(","))}
           <div class="tip">${a.active_hours && a.active_hours[0] === 0 ? "⚠️ 24 publications par jour par compte : TikTok peut y voir du spam et réduire la portée." : "Une publication par créneau : le meilleur clip en attente (les clips de live passent en premier)."}</div>` : ""}
+        <div class="opt-label" style="margin-top:12px">TikTok : maximum par jour</div>
+        ${chips("tiktok_daily_max", [[6, "6"], [10, "10"], [12, "12"], [15, "15 (limite TikTok)"]], a.tiktok_daily_max || 12)}
+        <div class="tip">TikTok refuse au-delà de 15 publications par 24 h (y compris celles faites à la main). Au-delà du maximum, le clip part seulement sur YouTube.</div>
         <div class="switches" style="margin-top:10px"><label class="switch"><input type="checkbox" id="live-prio" ${a.live_priority !== false ? "checked" : ""}> 🔴 Clips de live en priorité</label></div>
       </div>
       <div class="opt-wide" ${a.publish_every_minutes ? "hidden" : ""}><div class="opt-label">Heures de publication (${esc(a.timezone)})</div>
@@ -711,7 +714,7 @@ async function renderAuto() {
   $("#live-prio").onchange = (e) => save({ live_priority: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {
     const b = e.target.closest("[data-v]"); if (!b) return;
-    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day", "live_chunk_minutes", "publish_every_minutes"].includes(g.dataset.group);
+    const num = ["clips_per_video", "min_score", "max_video_minutes", "search_min_views", "max_new_videos_per_day", "live_chunk_minutes", "publish_every_minutes", "tiktok_daily_max"].includes(g.dataset.group);
     const val = g.dataset.group === "active_hours" ? b.dataset.v.split(",").map(Number) : num ? Number(b.dataset.v) : b.dataset.v;
     save({ [g.dataset.group]: val });
   }));
