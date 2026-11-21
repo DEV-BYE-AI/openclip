@@ -337,15 +337,18 @@ def retag_all(out_root: Path) -> int:
     return count
 
 
-def cleanup_sources(out_root: Path, keep_days: float = 7, min_free_gb: float = 4,
+def cleanup_sources(out_root: Path, keep_days: float | None = None, min_free_gb: float = 4,
                     target_free_gb: float = 6) -> list[Path]:
     """Libère de la place : supprime les vidéos sources (téléchargements, lives, envois)
     de plus de `keep_days` jours, puis les plus anciennes tant que le disque a moins de
     `min_free_gb` Go libres. Les clips montés ne sont jamais supprimés (seulement la vidéo
     d'origine : « D'autres clips » ne sera plus possible pour ces projets).
     """
+    import os
     import shutil
 
+    if keep_days is None:  # SOURCE_KEEP_DAYS dans .env (3 jours par défaut)
+        keep_days = float(os.environ.get("SOURCE_KEEP_DAYS", "3"))
     src = out_root / "_sources"
     if not src.exists():
         return []
