@@ -55,6 +55,15 @@ def _upload(api_key: str, profile: str, video: Path, platforms: list[str], title
         elif r.status_code == 429 or "limit" in str(msg).lower():
             msg = f"limite de ton forfait atteinte ({msg})"
         raise UploadPostError(f"Upload-Post : {msg}")
+    import logging
+    logging.getLogger(__name__).info("Upload-Post %s -> HTTP %s : %s", ",".join(platforms), r.status_code,
+                                     str(body)[:600])
+    # la requête globale peut réussir alors qu'une plateforme a échoué (ex. TikTok refuse)
+    results = body.get("results") or {}
+    for p in platforms:
+        res = results.get(p) if isinstance(results, dict) else None
+        if isinstance(res, dict) and (res.get("success") is False or res.get("error")):
+            raise UploadPostError(f"Upload-Post / {p} : {res.get('error') or res.get('message') or res}")
     return {"via": "upload-post", **{k: v for k, v in body.items() if k in {"results", "request_id", "message"}}}
 
 

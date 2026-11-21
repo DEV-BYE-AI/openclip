@@ -250,3 +250,20 @@ def test_upload_post_retries_profile_with_at(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(uploadpost, "_upload", fake)
     assert uploadpost.upload("k", "gta6clipvideo", tmp_path / "v.mp4", ["tiktok"], "t")["via"] == "upload-post"
     assert seen == ["gta6clipvideo", "@gta6clipvideo"]
+
+
+def test_upload_post_platform_failure_is_reported(tmp_path: Path, monkeypatch):
+    import pytest
+
+    from openclip.uploaders import uploadpost
+    v = tmp_path / "v.mp4"
+    v.write_bytes(b"x")
+
+    class Resp:
+        status_code = 200
+        def json(self):
+            return {"success": True, "results": {"tiktok": {"success": False, "error": "daily limit reached"}}}
+
+    monkeypatch.setattr(uploadpost.requests, "post", lambda *a, **k: Resp())
+    with pytest.raises(uploadpost.UploadPostError, match="daily limit"):
+        uploadpost.upload("k", "@p", v, ["tiktok"], "t")
