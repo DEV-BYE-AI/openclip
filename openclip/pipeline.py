@@ -353,8 +353,10 @@ def cleanup_sources(out_root: Path, keep_days: float | None = None, min_free_gb:
     src = out_root / "_sources"
     if not src.exists():
         return []
+    # tout sauf les petits fichiers d'analyse (transcriptions, sous-titres) : vidéos, audio,
+    # et restes de téléchargements interrompus (.part, .part-Frag12, .ytdl, .temp…)
     videos = sorted((f for f in src.rglob("*") if f.is_file()
-                     and f.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".part"}),
+                     and f.suffix.lower() not in {".json", ".json3", ".txt"}),
                     key=lambda f: f.stat().st_mtime)
     removed: list[Path] = []
     limit = time.time() - keep_days * 86400
