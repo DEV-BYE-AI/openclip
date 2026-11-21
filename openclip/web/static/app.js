@@ -595,6 +595,18 @@ async function renderAuto() {
       <div class="note" ${a.tiktok_via_upload_post && !a.tiktok_own ? "hidden" : ""}>Avant de connecter : ouvre l'app TikTok et passe sur le bon compte (ou déconnecte-toi de tiktok.com dans le navigateur), puis touche le bouton et autorise. Avec ta propre app TikTok en Sandbox, ajoute chaque compte dans « Target users ».</div>
       <label class="ed" style="padding:0;margin-top:6px">Profil Upload-Post de ce compte (optionnel)<input id="profile-up" value="${esc(a.upload_post_user || "")}" placeholder="ex. @inspecteurnews"></label>
     </div>
+    <details class="account" style="margin-bottom:18px" ${a.campaign_name ? "open" : ""}>
+      <summary style="font-size:16px">💰 Campagne de clipping ${a.campaign_name ? `· <b>${esc(a.campaign_name)}</b>` : "(optionnel)"}</summary>
+      <div class="muted" style="font-size:13px;margin:6px 0 10px">Pour un compte dédié à une campagne payée (Content Rewards, Whop…) : mets la source dans « Chaînes suivies » ou « Lives suivis », colle ici le texte imposé par la campagne, puis soumets les liens publiés sur la plateforme.</div>
+      <div class="ed" style="padding:0">
+        <label>Nom de la campagne<input id="camp-name" value="${esc(a.campaign_name || "")}" placeholder="ex. Streamer X – GTA RP"></label>
+        <label>Lien de la campagne<input id="camp-url" value="${esc(a.campaign_url || "")}" placeholder="https://…"></label>
+        <label>Texte obligatoire ajouté à chaque légende<textarea id="camp-caption" placeholder="ex. @streamerx #ad Lien en bio">${esc(a.campaign_caption || "")}</textarea></label>
+        <label class="switch"><input type="checkbox" id="camp-hide" ${a.campaign_hide_source ? "checked" : ""}> Ne pas ajouter « Source : … » (si la campagne l'interdit)</label>
+        <div class="chips">${a.campaign_url ? `<a class="btn btn-sm btn-ghost" href="${esc(a.campaign_url)}" target="_blank" rel="noopener">Ouvrir la campagne ↗</a>` : ""}<button type="button" class="btn btn-sm" id="camp-links">📋 Liens publiés à soumettre</button></div>
+        <div id="camp-list"></div>
+      </div>
+    </details>
     <div class="proj-head">
       <div>
         <h1 style="font-size:34px">Mode automatique</h1>
@@ -710,6 +722,19 @@ async function renderAuto() {
     } catch (err) { toast(err.message.includes("https") || err.message.includes("TIKTOK") ? "Configure d'abord ton application TikTok dans Comptes" : err.message, true); }
   };
   $("#profile-up").onchange = (e) => save({ upload_post_user: e.target.value.trim() });
+  [["camp-name", "campaign_name"], ["camp-url", "campaign_url"], ["camp-caption", "campaign_caption"]].forEach(([id, key]) => {
+    $("#" + id).onchange = (e) => save({ [key]: e.target.value.trim() });
+  });
+  $("#camp-hide").onchange = (e) => save({ campaign_hide_source: e.target.checked });
+  $("#camp-links").onclick = async () => {
+    const box = $("#camp-list");
+    const links = await api(q("/api/automation/links"));
+    if (!links.length) { box.innerHTML = `<div class="note">Aucun clip publié pour l'instant.</div>`; return; }
+    box.innerHTML = `<ol class="guide" style="margin-top:10px">${links.map((l) => `<li>${l.target === "tiktok" ? "TikTok" : "YouTube"} · ${esc(l.title)} · ${l.at ? new Date(l.at * 1000).toLocaleString("fr-FR") : ""}<br>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a> <button type="button" class="btn btn-sm btn-ghost" data-copy="${esc(l.url)}">Copier</button>` : `<span class="muted">lien non fourni par la plateforme : récupère-le dans l'app ou sur Upload-Post</span>`}</li>`).join("")}</ol>
+      <button type="button" class="btn btn-sm" id="copy-all">Copier tous les liens</button>`;
+    box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Lien copié"))));
+    $("#copy-all").onclick = () => navigator.clipboard.writeText(links.filter((l) => l.url).map((l) => l.url).join("\n")).then(() => toast("Liens copiés"));
+  };
   $("#auto-on").onchange = (e) => save({ enabled: e.target.checked });
   $("#live-prio").onchange = (e) => save({ live_priority: e.target.checked });
   view.querySelectorAll(".options [data-group]").forEach((g) => g.addEventListener("click", (e) => {

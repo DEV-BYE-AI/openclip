@@ -526,7 +526,9 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
         cfg = automation.load_settings()
         return publish_one(project_dir, index, settings, target, tiktok_mode=settings.tiktok_mode,
                            account=automation.current_profile(),
-                           upload_post_user=cfg.get("upload_post_user") or None)
+                           upload_post_user=cfg.get("upload_post_user") or None,
+                           caption_extra=cfg.get("campaign_caption") or "",
+                           hide_source=bool(cfg.get("campaign_hide_source")))
 
     scheduler = automation.Scheduler(auto_submit, auto_publish, out_root)
     app.state.scheduler = scheduler
@@ -560,6 +562,27 @@ def create_app(out_root: Path = Path("output"), settings: Settings | None = None
     if os.environ.get("OPENCLIP_SCHEDULER", "1") != "0":
         scheduler.start()
         lives.start()
+
+    @app.get("/api/automation/links")
+    def automation_links(profile: str = "main"):
+        """Liens des clips publiés par ce compte (à soumettre sur la plateforme de campagne)."""
+        def find_url(res, target):
+            if not isinstance(res, dict):
+                return ""
+            for key in ("url", "post_url", "share_url", "permalink"):
+                if isinstance(res.get(key), str) and res[key].startswith("http"):
+                    return res[key]
+            inner = (res.get("results") or {}).get(target) if isinstance(res.get("results"), dict) else None
+            return find_url(inner, target) if inner else ""
+
+        def run():
+            items = []
+            for q in automation.load_queue():
+                for target, res in (q.get("results") or {}).items():
+                    items.append({"title": q["title"], "target": target, "at": q.get("published_at"),
+                                  "url": find_url(res, target), "project": q["project"], "clip": q["clip"]})
+            return sorted(items, key=lambda x: -(x["at"] or 0))[:200]
+        return in_profile(profile, run)
 
     @app.post("/api/automation/lives")
     async def automation_add_live(request: Request, profile: str = "main"):

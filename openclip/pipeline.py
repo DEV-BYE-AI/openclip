@@ -260,11 +260,14 @@ def caption_for(clip: dict, credit: str = "") -> str:
 
 def publish_one(clip_dir: Path, index: int, settings: Settings, target: str, *,
                 tiktok_mode: str = "direct", privacy: str | None = None, account: str = "main",
-                upload_post_user: str | None = None) -> dict:
+                upload_post_user: str | None = None, caption_extra: str = "",
+                hide_source: bool = False) -> dict:
     manifest = load_manifest(clip_dir)
     clip = manifest["clips"][index - 1]
     source = manifest["source"]
-    credit = f"🎬 Source : {source.get('uploader') or ''} {source.get('url', '')}".strip()
+    credit = "" if hide_source else f"🎬 Source : {source.get('uploader') or ''} {source.get('url', '')}".strip()
+    if caption_extra.strip():  # mentions / hashtags / lien exigés par une campagne
+        credit = (caption_extra.strip() + "\n" + credit).strip()
     video = clip_dir / clip["file"]
     via = {x.strip() for x in settings.upload_post_platforms.split(",") if x.strip()}
     if target in via and settings.upload_post_key:

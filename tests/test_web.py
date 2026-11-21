@@ -267,3 +267,29 @@ def test_upload_post_platform_failure_is_reported(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(uploadpost.requests, "post", lambda *a, **k: Resp())
     with pytest.raises(uploadpost.UploadPostError, match="daily limit"):
         uploadpost.upload("k", "@p", v, ["tiktok"], "t")
+
+
+def test_campaign_caption_and_links(tmp_path: Path, monkeypatch):
+    import openclip.automation as auto
+    import openclip.config as config
+    from openclip.pipeline import publish_one
+    from openclip.uploaders import uploadpost
+
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "home")
+    monkeypatch.setattr(config, "CREDENTIALS_FILE", tmp_path / "home" / "c.json")
+    monkeypatch.setattr(config, "TOKENS_DIR", tmp_path / "home" / "tokens")
+    monkeypatch.delenv("OPENCLIP_PASSWORD", raising=False)
+    make_project(tmp_path)
+    sent = {}
+    monkeypatch.setattr(uploadpost, "upload", lambda key, user, video, platforms, title, desc="":
+                        sent.update(title=title) or {"via": "upload-post",
+                                                     "results": {"youtube": {"url": "https://youtu.be/x"}}})
+    config.save_credentials(upload_post_key="K", upload_post_user="@p", upload_post_platforms="tiktok")
+    publish_one(tmp_path / "abc123", 1, config.Settings(), "tiktok", caption_extra="@marque #ad", hide_source=True)
+    assert "@marque #ad" in sent["title"] and "Source" not in sent["title"]
+
+    auto.enqueue_project(tmp_path / "abc123", 0)
+    auto.mark(auto.load_queue()[0], status="published", published_at=1, results={"youtube": {"results": {"youtube": {"url": "https://youtu.be/x"}}}})
+    client = TestClient(create_app(tmp_path))
+    links = client.get("/api/automation/links").json()
+    assert links[0]["url"] == "https://youtu.be/x"

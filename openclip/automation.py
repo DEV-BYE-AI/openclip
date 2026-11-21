@@ -48,6 +48,11 @@ DEFAULTS = {
     "active_hours": [9, 23],      # publication à intervalle seulement entre ces heures (heure locale)
     "live_priority": True,        # les clips des lives passent devant le reste de la file
     "tiktok_daily_max": 12,       # TikTok refuse au-delà de 15 publications par 24 h et par compte
+    # campagne de clipping (Content Rewards, Whop…) : texte imposé ajouté à chaque légende
+    "campaign_name": "",
+    "campaign_url": "",
+    "campaign_caption": "",       # ex. « @marque #ad lien en bio »
+    "campaign_hide_source": False,
 }
 # filtres de recherche YouTube : tri par nombre de vues + période + vidéos uniquement
 SEARCH_SP = {"today": "CAMSBAgCEAE%3D", "week": "CAMSBAgDEAE%3D", "month": "CAMSBAgEEAE%3D"}
