@@ -152,7 +152,7 @@ def _looks_like_word(tag: str) -> bool:
     if not tag or tag.isdigit():
         return False
     letters = re.sub(r"\d", "", tag)
-    if re.search(r"[bcdfghjklmnpqrstvwxyz]{4,}", letters) or re.search(r"(.)\1\1", letters):
+    if re.search(r"[bcdfghjklmnpqrstvwxz]{4,}|[bcdfghjklmnpqrstvwxyz]{5,}", letters) or re.search(r"(.)\1\1", letters):
         return False
     vowels = sum(c in "aeiouy" for c in letters)
     return len(letters) < 6 or 0.25 <= vowels / len(letters) <= 0.7
