@@ -552,17 +552,23 @@ class Scheduler:
 
     def publish_next(self, cfg: dict | None = None) -> dict | None:
         cfg = cfg or load_settings()
+        who = current_profile()
         if not cfg["targets"]:  # partage manuel uniquement : les clips restent « à partager »
+            log.info("[publication %s] aucune cible cochée (TikTok/YouTube) : rien n'est publié", who)
             return None
         item = next_pending()
         if not item:
+            log.info("[publication %s] file d'attente vide : rien à publier", who)
             return None
+        log.info("[publication %s] envoi de « %s » vers %s", who, item["title"][:60], ", ".join(cfg["targets"]))
         results, errors = {}, {}
         for target in cfg["targets"]:
             try:
                 results[target] = self.publish(self.out_root / item["project"], item["clip"], target)
+                log.info("[publication %s] %s : OK", who, target)
             except Exception as exc:
                 errors[target] = str(exc)
+                log.warning("[publication %s] %s : ÉCHEC — %s", who, target, exc)
         mark(item, status="published" if results else "failed", published_at=time.time(),
              results=results, errors=errors)
         return {**item, "results": results, "errors": errors}

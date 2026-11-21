@@ -62,15 +62,27 @@ def _ydl_opts() -> dict:
     return opts
 
 
+class LiveUnavailable(RuntimeError):
+    """Lien vers une vidéo précise devenue indisponible (bloquée, privée) : pas un live hors ligne."""
+
+
 def probe_live(url: str) -> dict | None:
     """Infos du flux si la chaîne est en direct maintenant, sinon None."""
     import yt_dlp
 
+    class _Quiet:  # pas de « ERROR: … » dans les journaux toutes les 5 minutes
+        def debug(self, msg): pass
+        def info(self, msg): pass
+        def warning(self, msg): pass
+        def error(self, msg): log.debug("live %s : %s", url, msg)
+
     try:
-        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
+        with yt_dlp.YoutubeDL({**_ydl_opts(), "logger": _Quiet()}) as ydl:
             info = ydl.extract_info(live_url(url), download=False)
     except yt_dlp.utils.DownloadError as exc:  # « not currently live », « will begin in… »
-        log.debug("%s hors ligne : %s", url, exc)
+        msg = str(exc)
+        if "unavailable" in msg.lower() or "blocked" in msg.lower() or "private" in msg.lower():
+            raise LiveUnavailable(msg.split("ERROR:")[-1].strip()[:200]) from exc
         return None
     if not info or not (info.get("is_live") or info.get("live_status") == "is_live"):
         return None
@@ -179,7 +191,12 @@ class LiveManager:
         if running >= self.max_parallel:
             self._set(key, status="waiting", message="Trop de lives en même temps sur ce serveur")
             return
-        info = probe_live(ch["url"])
+        try:
+            info = probe_live(ch["url"])
+        except LiveUnavailable as exc:
+            self._set(key, status="error",
+                      message=f"Vidéo indisponible ({exc}). Remplace ce lien par celui de la chaîne : youtube.com/@nom")
+            return
         if not info:
             self._set(key, status="offline", message="Hors ligne", title="")
             return
