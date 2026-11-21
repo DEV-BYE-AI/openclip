@@ -106,3 +106,17 @@ def test_live_to_clips_end_to_end(tmp_path, monkeypatch):
     proj = client.get(f"/api/projects/{jobs[0]['project']}").json()
     assert proj["source"]["title"].startswith("Live streamer") and len(proj["clips"]) >= 1
     assert any(x["project"] == jobs[0]["project"] for x in client.get("/api/to-share").json())
+
+
+def test_live_and_huge_videos_are_refused():
+    from openclip.automation import pick_trending
+    from openclip.download import NotDownloadable, check_downloadable
+    with pytest.raises(NotDownloadable):
+        check_downloadable({"live_status": "is_live"})
+    with pytest.raises(NotDownloadable):
+        check_downloadable({"duration": 10 * 3600})
+    check_downloadable({"duration": 1800, "live_status": "not_live"})
+    vids = [{"id": "a", "views": 9e6, "duration": None}, {"id": "b", "views": 9e6, "duration": 900, "live": True},
+            {"id": "c", "views": 5e4, "duration": 900}]
+    assert [v["id"] for v in pick_trending(vids, set(), 1000, 90, 5)] == ["c"]
+    assert live.channel_name("https://www.youtube.com/live/oIeLbmYrarQ?si=x") == "live oIeLbmYrarQ"

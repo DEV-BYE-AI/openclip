@@ -31,6 +31,22 @@ def _format() -> str:
     return f"bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
+class NotDownloadable(RuntimeError):
+    pass
+
+
+def check_downloadable(info: dict) -> None:
+    """Refuse les lives en cours / à venir et les vidéos trop longues (MAX_SOURCE_HOURS, 4 h)."""
+    status = info.get("live_status") or ("is_live" if info.get("is_live") else "")
+    if status in {"is_live", "is_upcoming", "post_live"}:
+        raise NotDownloadable("c'est un live en cours (ou pas encore terminé) : ajoute la chaîne dans "
+                              "Auto → Lives suivis, ou réessaie quand la rediffusion sera disponible")
+    hours = float(os.environ.get("MAX_SOURCE_HOURS", "4"))
+    duration = float(info.get("duration") or 0)
+    if duration > hours * 3600:
+        raise NotDownloadable(f"vidéo trop longue ({duration / 3600:.1f} h, maximum {hours:g} h)")
+
+
 def download(url: str, out_dir: Path) -> SourceVideo:
     out_dir.mkdir(parents=True, exist_ok=True)
     opts = {
@@ -55,6 +71,10 @@ def download(url: str, out_dir: Path) -> SourceVideo:
     if cookies:
         opts["cookiefile"] = str(cookies)
     with yt_dlp.YoutubeDL(opts) as ydl:
+        # on regarde d'abord ce que c'est : un live en cours ne se termine jamais (le fichier
+        # grossirait sans fin), et une vidéo de plusieurs heures remplirait le disque
+        info = ydl.extract_info(url, download=False, process=False)
+        check_downloadable(info)
         info = ydl.extract_info(url, download=True)
         path = Path(ydl.prepare_filename(info)).with_suffix(".mp4")
         if not path.exists():  # extension différente selon le format retenu

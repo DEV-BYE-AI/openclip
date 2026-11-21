@@ -290,6 +290,7 @@ def search_videos(query: str, period: str = "week", limit: int = 30) -> list[dic
             continue
         out.append({"id": vid, "title": e.get("title") or "", "duration": e.get("duration") or 0,
                     "views": e.get("view_count") or 0, "channel": e.get("channel") or e.get("uploader") or "",
+                    "live": e.get("live_status") in {"is_live", "is_upcoming"},
                     "url": f"https://www.youtube.com/watch?v={vid}"})
     return out
 
@@ -317,8 +318,9 @@ def remove_search(query: str) -> None:
 
 def pick_trending(videos: list[dict], seen: set, min_views: int, max_minutes: float, count: int) -> list[dict]:
     """Les vidéos les plus vues, pas encore traitées, de 2 min à `max_minutes`."""
-    ok = [v for v in videos if v["id"] not in seen and v["views"] >= min_views
-          and (not v["duration"] or 120 <= v["duration"] <= max_minutes * 60)]
+    # durée inconnue = souvent un live en cours : on l'écarte
+    ok = [v for v in videos if v["id"] not in seen and v["views"] >= min_views and not v.get("live")
+          and v["duration"] and 120 <= v["duration"] <= max_minutes * 60]
     return sorted(ok, key=lambda v: -v["views"])[:count]
 
 

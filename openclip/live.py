@@ -38,7 +38,10 @@ def live_url(url: str) -> str:
 
 def channel_name(url: str) -> str:
     m = re.search(r"(?:@|twitch\.tv/|kick\.com/|channel/|c/)([^/?#]+)", url)
-    return m.group(1) if m else url
+    if m:
+        return m.group(1)
+    m = re.search(r"youtube\.com/(?:live/|watch\?v=)([\w-]{6,})", url) or re.search(r"youtu\.be/([\w-]{6,})", url)
+    return f"live {m.group(1)}" if m else "live"
 
 
 def _ydl_opts() -> dict:
