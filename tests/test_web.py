@@ -235,3 +235,18 @@ def test_to_share_list(tmp_path: Path, monkeypatch):
     assert client.get("/api/to-share").json() == []
     client.post("/api/projects/abc123/clips/1/shared", json={"shared": False})
     assert len(client.get("/api/to-share").json()) == 1
+
+
+def test_upload_post_retries_profile_with_at(tmp_path: Path, monkeypatch):
+    from openclip.uploaders import uploadpost
+    seen = []
+
+    def fake(api_key, profile, *a, **k):
+        seen.append(profile)
+        if profile != "@gta6clipvideo":
+            raise uploadpost.UploadPostError("Upload-Post : Username not associated with any profile")
+        return {"via": "upload-post"}
+
+    monkeypatch.setattr(uploadpost, "_upload", fake)
+    assert uploadpost.upload("k", "gta6clipvideo", tmp_path / "v.mp4", ["tiktok"], "t")["via"] == "upload-post"
+    assert seen == ["gta6clipvideo", "@gta6clipvideo"]

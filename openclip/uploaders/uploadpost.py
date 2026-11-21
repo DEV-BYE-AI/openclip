@@ -22,6 +22,19 @@ class UploadPostError(RuntimeError):
 
 def upload(api_key: str, profile: str, video: Path, platforms: list[str], title: str,
            description: str = "") -> dict:
+    """Envoie la vidéo. Si le profil n'est pas reconnu, réessaie avec/sans « @ »
+    (« gta6clipvideo » et « @gta6clipvideo » sont deux noms différents pour Upload-Post)."""
+    try:
+        return _upload(api_key, profile, video, platforms, title, description)
+    except UploadPostError as exc:
+        if "not associated" not in str(exc).lower() or not profile:
+            raise
+        other = profile[1:] if profile.startswith("@") else "@" + profile
+        return _upload(api_key, other, video, platforms, title, description)
+
+
+def _upload(api_key: str, profile: str, video: Path, platforms: list[str], title: str,
+            description: str = "") -> dict:
     if not api_key or not profile:
         raise UploadPostError("Upload-Post : clé API ou nom de profil manquant (Comptes)")
     data = [("user", profile), ("title", title[:2200])]

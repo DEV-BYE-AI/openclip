@@ -569,6 +569,10 @@ class Scheduler:
             except Exception as exc:
                 errors[target] = str(exc)
                 log.warning("[publication %s] %s : ÉCHEC — %s", who, target, exc)
-        mark(item, status="published" if results else "failed", published_at=time.time(),
-             results=results, errors=errors)
+        # erreur de réglage (profil/clé) : le clip n'y est pour rien, il reste en attente
+        config_error = not results and errors and all(
+            any(k in e.lower() for k in ("not associated", "clé api", "api key", "non connecté", "manquant"))
+            for e in errors.values())
+        mark(item, status="pending" if config_error else "published" if results else "failed",
+             published_at=time.time(), results=results, errors=errors)
         return {**item, "results": results, "errors": errors}
