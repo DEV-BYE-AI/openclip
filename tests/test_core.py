@@ -97,6 +97,15 @@ def test_stream_layout_graph():
     assert gx >= 400
 
 
+def test_stream_layout_cam_bottom_center():
+    # caméra en bas au milieu (cas « IRL ») : le jeu est pris au-dessus d'elle, centré
+    vf = build_graph(1920, 1080, "stream", 0.5, 1080, 1920, None, cam=(660, 700, 600, 380),
+                     audio=False, progress_bar=False)
+    gw, gh, gx, gy = (int(v) for v in vf.split("[g]crop=")[1].split(",")[0].split(":"))
+    assert gy == 0 and gh <= 700
+    assert abs((gx + gw / 2) - 960) < 2  # centré
+
+
 def test_no_facecam_on_plain_video(tmp_path: Path):
     from openclip.render import detect_facecam
     src = tmp_path / "plain.mp4"

@@ -118,7 +118,7 @@ def detect_facecam(path: Path, start: float, end: float, samples: int = 14):
         return None
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     cap = cv2.VideoCapture(str(path))
-    faces, edges, size = [], None, None
+    frames, edges, size = [], None, None
     try:
         for i in range(samples):
             t = start + (end - start) * (i + 0.5) / samples
@@ -130,25 +130,46 @@ def detect_facecam(path: Path, start: float, end: float, samples: int = 14):
             size = (w, h)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             found = cascade.detectMultiScale(gray, 1.1, 5, minSize=(max(24, h // 30),) * 2)
-            small = [f for f in found if f[2] < 0.18 * w]
-            if small:
-                faces.append(max(small, key=lambda f: f[2] * f[3]))
+            frames.append([tuple(map(float, f)) for f in found if f[2] < 0.18 * w])
             e = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0)) + np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1))
             edges = e if edges is None else edges + e
     finally:
         cap.release()
-    if not size or len(faces) < max(2, samples * 0.35):
+    if not size:
         return None
     w, h = size
-    arr = np.array(faces, dtype=float)
-    cx, cy = np.median(arr[:, 0] + arr[:, 2] / 2), np.median(arr[:, 1] + arr[:, 3] / 2)
-    fw, fh = np.median(arr[:, 2]), np.median(arr[:, 3])
-    spread = np.median(np.hypot(arr[:, 0] + arr[:, 2] / 2 - cx, arr[:, 1] + arr[:, 3] / 2 - cy))
-    if spread > 0.04 * w:  # le visage bouge : c'est un personnage du jeu, pas une caméra
+    need = max(2, samples * 0.35)
+    # Visages « fixes » : présents au même endroit sur une bonne partie des images. On ne prend
+    # pas juste le plus grand visage de chaque image : avec plusieurs personnes devant la caméra
+    # (ou un personnage du jeu), le plus grand change d'une image à l'autre.
+    tol = 0.04 * w
+    stable = []  # (nombre d'images, cx, cy, fw, fh)
+    for fr in frames:
+        for (fx, fy, fw_, fh_) in fr:
+            c = (fx + fw_ / 2, fy + fh_ / 2)
+            near, support = [], 0
+            for other in frames:
+                hits = [g for g in other if np.hypot(g[0] + g[2] / 2 - c[0], g[1] + g[3] / 2 - c[1]) < tol]
+                near += hits
+                support += bool(hits)
+            if support >= need:
+                arr = np.array(near)
+                stable.append((support, float(np.median(arr[:, 0] + arr[:, 2] / 2)),
+                               float(np.median(arr[:, 1] + arr[:, 3] / 2)),
+                               float(np.median(arr[:, 2])), float(np.median(arr[:, 3]))))
+    if not stable:
         return None
+    stable.sort(key=lambda s_: (-s_[0], -s_[3]))
+    _, cx, cy, fw, fh = stable[0]
+    # autres personnes fixes dans la même caméra (à côté du streamer) : on les garde dans le cadre
+    group = [s_ for s_ in stable if abs(s_[2] - cy) < 1.5 * fh and abs(s_[1] - cx) < 5 * fw]
+    gx0 = min(s_[1] - s_[3] / 2 for s_ in group)
+    gx1 = max(s_[1] + s_[3] / 2 for s_ in group)
+    cx, fw_group = (gx0 + gx1) / 2, gx1 - gx0
+    pad = fw_group / 2 - fw / 2  # demi-largeur ajoutée par les autres visages
 
     # bords du cadre : lignes de contours fortes et fixes autour du visage
-    edges /= max(1, len(faces))
+    edges /= max(1, len(frames))
     vx = edges
 
     def strongest(profile, lo, hi, prefer):
@@ -160,23 +181,23 @@ def detect_facecam(path: Path, start: float, end: float, samples: int = 14):
         return lo + k if seg[k] > prefer else None
 
     y0, y1 = int(max(0, cy - 2.5 * fh)), int(min(h, cy + 2.5 * fh))
-    x0, x1 = int(max(0, cx - 3 * fw)), int(min(w, cx + 3 * fw))
+    x0, x1 = int(max(0, cx - pad - 3 * fw)), int(min(w, cx + pad + 3 * fw))
     cols = vx[y0:y1].mean(axis=0)
     rows = vx[:, x0:x1].mean(axis=1)
     thr_c, thr_r = np.median(cols) * 2.2, np.median(rows) * 2.2
-    left = strongest(cols, cx - 3 * fw, cx - 0.8 * fw, thr_c)
-    right = strongest(cols, cx + 0.8 * fw, cx + 3 * fw, thr_c)
+    left = strongest(cols, cx - pad - 3 * fw, cx - pad - 0.8 * fw, thr_c)
+    right = strongest(cols, cx + pad + 0.8 * fw, cx + pad + 3 * fw, thr_c)
     top = strongest(rows, cy - 2.6 * fh, cy - 0.9 * fh, thr_r)
     bottom = strongest(rows, cy + 0.9 * fh, cy + 2.6 * fh, thr_r)
     # bords collés au bord de l'image ou introuvables : estimation à partir du visage
-    left = 0 if cx - 3 * fw <= 0 and left is None else left
-    left = left if left is not None else cx - 1.9 * fw
-    right = right if right is not None else cx + 1.9 * fw
+    left = 0 if cx - pad - 3 * fw <= 0 and left is None else left
+    left = left if left is not None else cx - pad - 1.9 * fw
+    right = right if right is not None else cx + pad + 1.9 * fw
     top = top if top is not None else cy - 1.5 * fh
     bottom = bottom if bottom is not None else cy + 1.5 * fh
     x, y = int(max(0, left)), int(max(0, top))
     bw, bh = int(min(w, right) - x), int(min(h, bottom) - y)
-    if bw < 2 * fw or bh < 1.5 * fh or bw > 0.6 * w or bh > 0.7 * h:
+    if bw < 2 * fw or bh < 1.5 * fh or bw > 0.65 * w or bh > 0.7 * h:
         return None
     return (x, y, bw // 2 * 2, bh // 2 * 2)
 
@@ -274,20 +295,32 @@ def build_graph(src_w: int, src_h: int, mode: str, center_x: float | None, out_w
             nh = int(cw / want) // 2 * 2
             y, ch = y + (ch - nh) // 2, nh
         bot_h = out_h - top_h
-        gw = min(src_w, int(src_h * out_w / bot_h) // 2 * 2)
+        cx0, cy0, cw0, ch0 = cam
+        gy, gh = 0, src_h
+        gw = min(src_w, int(gh * out_w / bot_h) // 2 * 2)
+        free_side = cx0 >= gw or src_w - (cx0 + cw0) >= gw
+        if not free_side:
+            # caméra au milieu (en bas ou en haut) : on prend le jeu au-dessus ou en dessous d'elle,
+            # sinon le jeu serait décalé sur le côté ou la caméra apparaîtrait deux fois
+            above, below = cy0, src_h - (cy0 + ch0)
+            if max(above, below) >= 0.45 * src_h:
+                gy, gh = (0, above) if above >= below else (cy0 + ch0, below)
+                gh = gh // 2 * 2
+                gw = min(src_w, int(gh * out_w / bot_h) // 2 * 2)
         gc = center_x if center_x is not None else 0.5
         gx = int(min(max(gc * src_w - gw / 2, 0), src_w - gw))
         # évite de remettre la caméra dans la partie jeu si c'est possible
-        if gx < cam[0] + cam[2] and cam[0] < gx + gw:
-            right_room, left_room = src_w - (cam[0] + cam[2]), cam[0]
-            if right_room >= gw and cam[0] < src_w / 2:
-                gx = max(cam[0] + cam[2], min(gx, src_w - gw))
+        overlaps_v = gy < cy0 + ch0 and cy0 < gy + gh
+        if overlaps_v and gx < cx0 + cw0 and cx0 < gx + gw:
+            right_room, left_room = src_w - (cx0 + cw0), cx0
+            if right_room >= gw and cx0 < src_w / 2:
+                gx = max(cx0 + cw0, min(gx, src_w - gw))
             elif left_room >= gw:
-                gx = min(cam[0] - gw, gx)
+                gx = min(cx0 - gw, gx)
         chains.append(
             f"[vc]split=2[c][g];"
             f"[c]crop={cw}:{ch}:{x}:{y},{enhance(out_w, top_h, cw, ch)},setsar=1[top];"
-            f"[g]crop={gw}:{src_h}:{gx}:0,{enhance(out_w, bot_h, gw, src_h)},setsar=1[bot];"
+            f"[g]crop={gw}:{gh}:{gx}:{gy},{enhance(out_w, bot_h, gw, gh)},setsar=1[bot];"
             f"[top][bot]vstack=inputs=2,setsar=1[vf]"
         )
     elif mode == "blur":
